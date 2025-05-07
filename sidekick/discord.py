@@ -1,7 +1,9 @@
 import os
 import discord
 import asyncio
-from discord.ext import commands
+import random
+import time
+from discord.ext import commands, tasks
 from collections import defaultdict
 from sidekick.chat import load_model, generate_response
 
@@ -16,11 +18,36 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 # Format: {channel_id: [{"role": "...", "content": "..."}]}
 conversation_histories = defaultdict(list)
 
+# Dictionary to track conversation engagement levels for each channel
+# Format: {channel_id: {"level": float, "last_update": timestamp}}
+conversation_engagement = {}
+
+# Configuration for random responses
+RESPONSE_CONFIG = {
+    # Base chance (percentage) to respond to any message (0.5%)
+    "BASE_CHANCE": 0.5,
+    
+    # Maximum chance (percentage) to respond when fully engaged (25%)
+    "MAX_CHANCE": 80.0,
+    
+    # How much to boost engagement when bot is mentioned or used in a command
+    "DIRECT_ENGAGEMENT_BOOST": 1.0,  # 100% engagement
+    
+    # How much to boost engagement when the bot decides to respond to a message
+    "RESPONSE_ENGAGEMENT_BOOST": 0.7,  # 70% boost
+    
+    # How much engagement decays per second
+    "DECAY_RATE": 0.0028,  # Decays to ~0 in about 6 minutes
+    
+    # Threshold below which engagement is considered zero
+    "MIN_THRESHOLD": 0.01
+}
+
 # Maximum conversation history length
 MAX_HISTORY_LENGTH = 10
 
 # System prompt for the AI
-DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant named Samn. You are polite, knowledgeable, and concise."
+DEFAULT_SYSTEM_PROMPT = "You are an intelligent robot named Samn. You are polite, knowledgeable, and concise."
 
 @bot.event
 async def on_ready():
@@ -30,6 +57,9 @@ async def on_ready():
     
     # Pre-load the model on startup
     await asyncio.to_thread(load_model)
+    
+    # Start the engagement decay task
+    engagement_decay_task.start()
 
 def get_conversation_history(channel_id):
     """Get conversation history for a specific channel"""
@@ -53,43 +83,154 @@ def add_to_conversation(channel_id, role, content):
         history = [history[0]] + history[-(MAX_HISTORY_LENGTH):]
         conversation_histories[channel_id] = history
 
+def get_engagement_level(channel_id):
+    """Get the current engagement level for a channel (0.0 to 1.0)"""
+    if channel_id not in conversation_engagement:
+        return 0.0
+    
+    # Get channel engagement data
+    engagement_data = conversation_engagement[channel_id]
+    
+    # Calculate decay since last update
+    current_time = time.time()
+    time_elapsed = current_time - engagement_data["last_update"]
+    
+    # Apply decay based on time elapsed
+    engagement_level = engagement_data["level"]
+    engagement_level *= (1.0 - RESPONSE_CONFIG["DECAY_RATE"] * time_elapsed)
+    
+    # Enforce threshold
+    if engagement_level < RESPONSE_CONFIG["MIN_THRESHOLD"]:
+        engagement_level = 0.0
+    
+    # Update the stored engagement level
+    conversation_engagement[channel_id] = {
+        "level": engagement_level,
+        "last_update": current_time
+    }
+    
+    return engagement_level
+
+def boost_engagement(channel_id, boost_amount):
+    """Boost the engagement level for a channel"""
+    # Get current engagement level first (this handles initialization and decay)
+    current_level = get_engagement_level(channel_id)
+    
+    # Boost engagement, capped at 1.0
+    new_level = min(1.0, current_level + boost_amount)
+    
+    # Update engagement data
+    conversation_engagement[channel_id] = {
+        "level": new_level,
+        "last_update": time.time()
+    }
+
+def should_respond_to_message(message):
+    """Determine if the bot should respond to a message based on engagement level"""
+    channel_id = message.channel.id
+    
+    # Get current engagement level for this channel
+    engagement_level = get_engagement_level(channel_id)
+    
+    # Calculate response chance based on engagement level
+    base_chance = RESPONSE_CONFIG["BASE_CHANCE"] / 100.0  # Convert to probability
+    max_chance = RESPONSE_CONFIG["MAX_CHANCE"] / 100.0    # Convert to probability
+    
+    # Linear interpolation between base and max chance based on engagement
+    response_chance = base_chance + (max_chance - base_chance) * engagement_level
+    
+    # Random check if we should respond
+    return random.random() < response_chance
+
+@tasks.loop(seconds=30)
+async def engagement_decay_task():
+    """Background task to periodically clean up engagement data for inactive channels"""
+    channels_to_remove = []
+    
+    # Current time
+    current_time = time.time()
+    
+    # Check each channel's engagement
+    for channel_id, data in conversation_engagement.items():
+        # Calculate how long since last update
+        time_elapsed = current_time - data["last_update"]
+        
+        # Calculate new engagement level after decay
+        new_level = data["level"] * (1.0 - RESPONSE_CONFIG["DECAY_RATE"] * time_elapsed)
+        
+        if new_level < RESPONSE_CONFIG["MIN_THRESHOLD"]:
+            # If engagement is below threshold, mark for removal
+            channels_to_remove.append(channel_id)
+        else:
+            # Otherwise, update the engagement level
+            conversation_engagement[channel_id] = {
+                "level": new_level,
+                "last_update": current_time
+            }
+    
+    # Remove inactive channels
+    for channel_id in channels_to_remove:
+        conversation_engagement.pop(channel_id, None)
+
+@engagement_decay_task.before_loop
+async def before_decay_task():
+    """Wait for the bot to be ready before starting the engagement decay task"""
+    await bot.wait_until_ready()
+
 # This event triggers on every message sent that the bot can see
 @bot.event
 async def on_message(message):
     # Don't respond to our own messages to prevent infinite loops
     if message.author == bot.user:
         return
+    
+    # Flag to track if this is a direct mention
+    is_direct_mention = bot.user.mentioned_in(message)
+    should_respond = False
+    content = message.content
+    
+    if is_direct_mention:
+        # This is a direct mention - we should definitely respond
+        should_respond = True
         
-    # Respond to mentions
-    if bot.user.mentioned_in(message):
         # Remove mention from the message to get clean content
-        content = message.content
         for mention in message.mentions:
             content = content.replace(f'<@{mention.id}>', '').replace(f'<@!{mention.id}>', '')
         content = content.strip()
         
-        if content:  # Only respond if there's actual content after removing mentions
-            # Send typing indicator
-            async with message.channel.typing():
-                # Add user message to conversation
-                add_to_conversation(message.channel.id, "user", f"{message.author.display_name}: {content}")
-                
-                # Get conversation history for this channel
-                history = get_conversation_history(message.channel.id)
-                
-                # Generate response using the model (run in thread pool to not block the event loop)
-                response = await asyncio.to_thread(
-                    generate_response, 
-                    history,
-                    max_new_tokens=256,
-                    temperature=0.7
-                )
-                
-                # Add bot response to conversation history
-                add_to_conversation(message.channel.id, "assistant", response)
-                
-                # Send the response
-                await message.channel.send(response)
+        # Boost engagement level significantly
+        boost_engagement(message.channel.id, RESPONSE_CONFIG["DIRECT_ENGAGEMENT_BOOST"])
+    else:
+        # Not a direct mention - check if we should randomly respond
+        should_respond = should_respond_to_message(message)
+        
+        if should_respond:
+            # If we're going to respond, boost engagement
+            boost_engagement(message.channel.id, RESPONSE_CONFIG["RESPONSE_ENGAGEMENT_BOOST"])
+    
+    # Generate and send a response if appropriate
+    if should_respond and content:
+        # Send typing indicator
+        async with message.channel.typing():
+            # Add user message to conversation
+            add_to_conversation(message.channel.id, "user", f"{message.author.display_name}: {content}")
+            
+            # Get conversation history for this channel
+            history = get_conversation_history(message.channel.id)
+            
+            # Generate response using the model (run in thread pool to not block the event loop)
+            response = await asyncio.to_thread(
+                generate_response, 
+                history,
+                max_new_tokens=256,
+                temperature=0.7
+            )
+            
+            # Add bot response to conversation history
+            add_to_conversation(message.channel.id, "assistant", response)
+            
+            # Send the response
+            await message.channel.send(response)
     
     # IMPORTANT: Process commands if you're also using command system
     # Without this, your commands won't work when using on_message
@@ -106,6 +247,9 @@ async def chat(ctx, *, message: str = None):
     if not message:
         await ctx.send("Please provide a message to chat with the AI.")
         return
+    
+    # Boost engagement level significantly - direct command is similar to a mention
+    boost_engagement(ctx.channel.id, RESPONSE_CONFIG["DIRECT_ENGAGEMENT_BOOST"])
     
     # Send typing indicator
     async with ctx.typing():
@@ -141,6 +285,11 @@ async def clear_history(ctx):
                 break
         
         conversation_histories[ctx.channel.id] = [{"role": "system", "content": system_prompt}]
+        
+        # Reset engagement for this channel (clearing history suggests ending the conversation)
+        if ctx.channel.id in conversation_engagement:
+            conversation_engagement.pop(ctx.channel.id)
+        
         await ctx.send("Conversation history cleared!")
     else:
         await ctx.send("No conversation history to clear.")
@@ -151,6 +300,9 @@ async def set_system_prompt(ctx, *, prompt: str = None):
     if not prompt:
         await ctx.send("Please provide a system prompt.")
         return
+    
+    # Boost engagement slightly - modifying system prompt shows interest
+    boost_engagement(ctx.channel.id, 0.3)
     
     history = get_conversation_history(ctx.channel.id)
     
@@ -167,6 +319,30 @@ async def set_system_prompt(ctx, *, prompt: str = None):
         history.insert(0, {"role": "system", "content": prompt})
     
     await ctx.send(f"System prompt updated to: '{prompt}'")
+
+@bot.command(name='engagement')
+@commands.is_owner()  # Restrict this command to the bot owner
+async def check_engagement(ctx):
+    """Check the current engagement level for this channel (debug command)"""
+    channel_id = ctx.channel.id
+    
+    # Get current engagement
+    engagement_level = get_engagement_level(channel_id)
+    
+    # Calculate current response chance
+    base_chance = RESPONSE_CONFIG["BASE_CHANCE"] / 100.0
+    max_chance = RESPONSE_CONFIG["MAX_CHANCE"] / 100.0
+    response_chance = base_chance + (max_chance - base_chance) * engagement_level
+    
+    # Format as percentages
+    engagement_percent = engagement_level * 100
+    response_percent = response_chance * 100
+    
+    await ctx.send(f"Debug info for this channel:\n"
+                  f"- Engagement level: {engagement_percent:.2f}%\n"
+                  f"- Current response chance: {response_percent:.2f}%\n"
+                  f"- Base response chance: {RESPONSE_CONFIG['BASE_CHANCE']}%\n"
+                  f"- Max response chance: {RESPONSE_CONFIG['MAX_CHANCE']}%")
 
 # Run the bot
 if __name__ == '__main__':

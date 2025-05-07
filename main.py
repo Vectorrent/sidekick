@@ -27,7 +27,14 @@ def main():
     print("  !chat <message> - Chat with the AI")
     print("  !clear - Clear conversation history")
     print("  !system <prompt> - Set a custom system prompt")
-    print("The bot will also respond to @mentions")
+    print("  !engagement - [Owner only] Check engagement level for debugging")
+    print()
+    print("Conversation Engagement Features:")
+    print("  - The bot has a small random chance to respond to any message")
+    print("  - After engagement, the bot becomes more likely to respond")
+    print("  - Engagement naturally decays over time (~6 minutes)")
+    print("  - Each channel has its own independent engagement level")
+    print("  - The bot will always respond to direct @mentions and !chat commands")
     print("=" * 50)
     
     # Run the bot
