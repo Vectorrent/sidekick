@@ -440,6 +440,8 @@ async def on_message(message):
 )
 async def ping(ctx):
     """Simple command that responds with 'Pong!' to check if bot is responsive"""
+    # Deliberately not using ephemeral=True here, as ping is often used to check if 
+    # the bot is visible to everyone in the channel
     await ctx.send('Pong!')
 
 @bot.hybrid_command(
@@ -510,9 +512,10 @@ async def clear_history(ctx):
         if ctx.channel.id in conversation_engagement:
             conversation_engagement.pop(ctx.channel.id)
         
-        await ctx.send("Conversation history cleared!")
+        # Send ephemeral confirmation message
+        await ctx.send("Conversation history cleared!", ephemeral=True)
     else:
-        await ctx.send("No conversation history to clear.")
+        await ctx.send("No conversation history to clear.", ephemeral=True)
 
 @bot.hybrid_command(
     name='system',
@@ -521,7 +524,7 @@ async def clear_history(ctx):
 async def set_system_prompt(ctx, *, prompt: str = None):
     """Set a custom system prompt for the AI in the current channel"""
     if not prompt:
-        await ctx.send("Please provide a system prompt.")
+        await ctx.send("Please provide a system prompt.", ephemeral=True)
         return
     
     # Boost engagement slightly - modifying system prompt shows interest
@@ -541,7 +544,8 @@ async def set_system_prompt(ctx, *, prompt: str = None):
     if not system_updated:
         history.insert(0, {"role": "system", "content": prompt})
     
-    await ctx.send(f"System prompt updated to: '{prompt}'")
+    # Send ephemeral confirmation message
+    await ctx.send(f"System prompt updated to: '{prompt}'", ephemeral=True)
 
 @bot.hybrid_command(
     name='config',
@@ -557,25 +561,31 @@ async def config_generation(ctx, param=None, value=None):
     # If no param specified, show current config
     if param is None:
         param_list = '\n'.join([f"- **{k}**: `{v}`" for k, v in params.items()])
-        await ctx.send(f"Current generation parameters for this channel:\n{param_list}\n\n"
-                      f"Use `!config <parameter> <value>` to change a parameter.")
+        await ctx.send(
+            f"Current generation parameters for this channel:\n{param_list}\n\n"
+            f"Use `!config <parameter> <value>` to change a parameter.",
+            ephemeral=True
+        )
         return
     
     # If param is 'reset', reset to defaults
     if param.lower() == 'reset':
         generation_params[channel_id] = DEFAULT_GENERATION_PARAMS.copy()
-        await ctx.send("Generation parameters reset to defaults.")
+        await ctx.send("Generation parameters reset to defaults.", ephemeral=True)
         return
     
     # Check if the parameter exists
     if param not in DEFAULT_GENERATION_PARAMS:
         valid_params = '`, `'.join(DEFAULT_GENERATION_PARAMS.keys())
-        await ctx.send(f"Unknown parameter: `{param}`\nValid parameters: `{valid_params}`")
+        await ctx.send(
+            f"Unknown parameter: `{param}`\nValid parameters: `{valid_params}`", 
+            ephemeral=True
+        )
         return
     
     # If no value specified, show current value
     if value is None:
-        await ctx.send(f"Current value of `{param}`: `{params[param]}`")
+        await ctx.send(f"Current value of `{param}`: `{params[param]}`", ephemeral=True)
         return
     
     # Try to convert value to the appropriate type
@@ -595,14 +605,14 @@ async def config_generation(ctx, param=None, value=None):
         else:
             new_value = value
     except ValueError as e:
-        await ctx.send(f"Invalid value for `{param}`: {str(e)}")
+        await ctx.send(f"Invalid value for `{param}`: {str(e)}", ephemeral=True)
         return
     
     # Update the parameter
     params[param] = new_value
     generation_params[channel_id] = params
     
-    await ctx.send(f"Updated `{param}` to `{new_value}`")
+    await ctx.send(f"Updated `{param}` to `{new_value}`", ephemeral=True)
 
 @bot.hybrid_command(
     name='logging',
@@ -615,39 +625,45 @@ async def toggle_logging(ctx, setting=None, level=None):
     
     # If no setting provided, show current status
     if setting is None:
-        await ctx.send(f"Logging is currently **{'enabled' if ENABLE_LOGGING else 'disabled'}**\n"
-                      f"Log level: **{LOG_LEVEL}**\n\n"
-                      f"Use `!logging on/off` to toggle logging\n"
-                      f"Use `!logging level 0/1/2` to set log level")
+        await ctx.send(
+            f"Logging is currently **{'enabled' if ENABLE_LOGGING else 'disabled'}**\n"
+            f"Log level: **{LOG_LEVEL}**\n\n"
+            f"Use `!logging on/off` to toggle logging\n"
+            f"Use `!logging level 0/1/2` to set log level",
+            ephemeral=True  # Make response visible only to the command invoker
+        )
         return
     
     # Handle setting the log level
     if setting.lower() == 'level':
         if level is None:
-            await ctx.send(f"Current log level: **{LOG_LEVEL}**\n"
-                         f"0 = minimal, 1 = basic, 2 = detailed")
+            await ctx.send(
+                f"Current log level: **{LOG_LEVEL}**\n"
+                f"0 = minimal, 1 = basic, 2 = detailed",
+                ephemeral=True
+            )
             return
         
         try:
             level_int = int(level)
             if 0 <= level_int <= 2:
                 LOG_LEVEL = level_int
-                await ctx.send(f"Log level set to **{LOG_LEVEL}**")
+                await ctx.send(f"Log level set to **{LOG_LEVEL}**", ephemeral=True)
             else:
-                await ctx.send("Log level must be 0, 1, or 2")
+                await ctx.send("Log level must be 0, 1, or 2", ephemeral=True)
         except ValueError:
-            await ctx.send("Log level must be a number (0, 1, or 2)")
+            await ctx.send("Log level must be a number (0, 1, or 2)", ephemeral=True)
         return
     
     # Handle toggling logging on/off
     if setting.lower() in ['on', 'true', 'enable', 'yes', '1']:
         ENABLE_LOGGING = True
-        await ctx.send("Prompt logging **enabled**")
+        await ctx.send("Prompt logging **enabled**", ephemeral=True)
     elif setting.lower() in ['off', 'false', 'disable', 'no', '0']:
         ENABLE_LOGGING = False
-        await ctx.send("Prompt logging **disabled**")
+        await ctx.send("Prompt logging **disabled**", ephemeral=True)
     else:
-        await ctx.send("Invalid setting. Use `on` or `off`")
+        await ctx.send("Invalid setting. Use `on` or `off`", ephemeral=True)
 
 @bot.hybrid_command(
     name='engagement',
@@ -670,11 +686,14 @@ async def check_engagement(ctx):
     engagement_percent = engagement_level * 100
     response_percent = response_chance * 100
     
-    await ctx.send(f"Debug info for this channel:\n"
-                  f"- Engagement level: {engagement_percent:.2f}%\n"
-                  f"- Current response chance: {response_percent:.2f}%\n"
-                  f"- Base response chance: {RESPONSE_CONFIG['BASE_CHANCE']}%\n"
-                  f"- Max response chance: {RESPONSE_CONFIG['MAX_CHANCE']}%")
+    await ctx.send(
+        f"Debug info for this channel:\n"
+        f"- Engagement level: {engagement_percent:.2f}%\n"
+        f"- Current response chance: {response_percent:.2f}%\n"
+        f"- Base response chance: {RESPONSE_CONFIG['BASE_CHANCE']}%\n"
+        f"- Max response chance: {RESPONSE_CONFIG['MAX_CHANCE']}%",
+        ephemeral=True  # Make response visible only to the command invoker
+    )
 
 # Run the bot
 if __name__ == '__main__':
