@@ -73,14 +73,14 @@ ENABLE_LOGGING = False  # Enable prompt logging by default for debugging
 LOG_LEVEL = 1  # 0 = minimal, 1 = basic, 2 = detailed
 
 # System prompts for the AI
-DEFAULT_SYSTEM_PROMPT = "You are an AI researcher named Maya Chen. You are polite, knowledgeable, and concise."
-DM_SYSTEM_PROMPT = "You are an AI researcher named Maya Chen. You are polite, knowledgeable, and concise. You are in a private, direct message conversation with a user. Be helpful, attentive, and personable."
+DEFAULT_SYSTEM_PROMPT = "You are named Maya Chen, and you are an AI researcher. You are polite, knowledgeable, and concise."
+DM_SYSTEM_PROMPT = DEFAULT_SYSTEM_PROMPT
 
 # Default generation parameters for LLM responses
 # These can be overridden per channel
 DEFAULT_GENERATION_PARAMS = {
     "max_new_tokens": 512,     # Maximum length of generated text
-    "temperature": 0.7,        # Controls randomness (0.0-1.0) - higher = more random
+    "temperature": 0.45,        # Controls randomness (0.0-1.0) - higher = more random
     # "top_p": 0.9,            # Nucleus sampling - keep tokens with cumulative probability >= top_p
     # "top_k": 50,             # Keep only the top k tokens - 0 means no filtering
     # "min_p": 0.02,             # Minimum token probability, which will be scaled by the probability of the most likely token.
