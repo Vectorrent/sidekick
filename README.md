@@ -1,0 +1,2 @@
+# sidekick
+a small experiment
