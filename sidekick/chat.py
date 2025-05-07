@@ -46,15 +46,25 @@ def load_model(model_name="HuggingFaceTB/SmolLM2-135M-Instruct"):
         print(f"Error loading model: {e}")
         return None, None, None
 
-def generate_response(messages, max_new_tokens=256, temperature=0.7):
+def generate_response(messages, **generation_kwargs):
     """
     Generate a response from the model based on the conversation history
     
     Args:
         messages (list): List of message dicts with 'role' and 'content' keys
-        max_new_tokens (int): Maximum number of tokens to generate
-        temperature (float): Temperature parameter for generation
-        
+        **generation_kwargs: Keyword arguments passed to model.generate()
+            Common parameters include:
+            - max_new_tokens (int): Maximum number of tokens to generate
+            - min_new_tokens (int): Minimum number of tokens to generate
+            - temperature (float): Temperature for sampling
+            - top_k (int): Number of highest probability tokens to keep for sampling
+            - top_p (float): Keep tokens with cumulative probability >= top_p
+            - repetition_penalty (float): Penalty for repeating tokens
+            - no_repeat_ngram_size (int): Size of n-grams to prevent repetition of
+            - do_sample (bool): Whether to use sampling or greedy decoding
+            - num_beams (int): Number of beams for beam search
+            - num_return_sequences (int): Number of sequences to return
+            
     Returns:
         str: The generated response
     """
@@ -67,6 +77,18 @@ def generate_response(messages, max_new_tokens=256, temperature=0.7):
             return "Error: Failed to load the AI model."
     
     try:
+        # Set default generation parameters if not provided
+        default_params = {
+            'max_new_tokens': 256,
+            'temperature': 0.7,
+            'do_sample': True,
+            'pad_token_id': tokenizer.eos_token_id
+        }
+        
+        # Update defaults with provided parameters
+        generate_params = default_params.copy()
+        generate_params.update(generation_kwargs)
+        
         # Format the conversation using chat template
         input_text = tokenizer.apply_chat_template(
             messages, 
@@ -77,13 +99,10 @@ def generate_response(messages, max_new_tokens=256, temperature=0.7):
         # Encode the formatted conversation
         inputs = tokenizer.encode(input_text, return_tensors="pt").to(device)
         
-        # Generate a response
+        # Generate a response with all the specified parameters
         outputs = model.generate(
             inputs,
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-            do_sample=True,
-            pad_token_id=tokenizer.eos_token_id
+            **generate_params
         )
         
         # Decode the response

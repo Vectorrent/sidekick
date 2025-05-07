@@ -47,7 +47,25 @@ RESPONSE_CONFIG = {
 MAX_HISTORY_LENGTH = 10
 
 # System prompt for the AI
-DEFAULT_SYSTEM_PROMPT = "You are an intelligent robot named Samn. You are polite, knowledgeable, and concise."
+DEFAULT_SYSTEM_PROMPT = "You are an assistant named Samn. You are polite, knowledgeable, and concise."
+
+# Default generation parameters for LLM responses
+# These can be overridden per channel
+DEFAULT_GENERATION_PARAMS = {
+    "max_new_tokens": 512,     # Maximum length of generated text
+    "temperature": 0.7,        # Controls randomness (0.0-1.0) - higher = more random
+    # "top_p": 0.9,            # Nucleus sampling - keep tokens with cumulative probability >= top_p
+    # "top_k": 50,             # Keep only the top k tokens - 0 means no filtering
+    "min_p": 0.02,             # Minimum token probability, which will be scaled by the probability of the most likely token.
+    "repetition_penalty": 1.1, # Penalty for repeating tokens (1.0 = no penalty)
+    "do_sample": True,         # Whether to use sampling vs greedy decoding
+    # "num_beams": 1,          # Number of beams for beam search (1 = no beam search)
+    "no_repeat_ngram_size": 9  # Size of n-grams to prevent repetition (0 = no filtering)
+}
+
+# Store generation parameters per channel
+# Format: {channel_id: {param_name: value, ...}}
+generation_params = defaultdict(lambda: DEFAULT_GENERATION_PARAMS.copy())
 
 @bot.event
 async def on_ready():
@@ -82,6 +100,11 @@ def add_to_conversation(channel_id, role, content):
         # Keep system message and recent messages
         history = [history[0]] + history[-(MAX_HISTORY_LENGTH):]
         conversation_histories[channel_id] = history
+
+def get_generation_params(channel_id):
+    """Get generation parameters for a specific channel"""
+    # If channel has custom params, return those. Otherwise return defaults.
+    return generation_params[channel_id]
 
 def get_engagement_level(channel_id):
     """Get the current engagement level for a channel (0.0 to 1.0)"""
@@ -218,12 +241,14 @@ async def on_message(message):
             # Get conversation history for this channel
             history = get_conversation_history(message.channel.id)
             
+            # Get generation parameters for this channel
+            params = get_generation_params(message.channel.id)
+            
             # Generate response using the model (run in thread pool to not block the event loop)
             response = await asyncio.to_thread(
                 generate_response, 
                 history,
-                max_new_tokens=256,
-                temperature=0.7
+                **params
             )
             
             # Add bot response to conversation history
@@ -259,12 +284,14 @@ async def chat(ctx, *, message: str = None):
         # Get conversation history for this channel
         history = get_conversation_history(ctx.channel.id)
         
+        # Get generation parameters for this channel
+        params = get_generation_params(ctx.channel.id)
+        
         # Generate response using the model (run in thread pool to not block the event loop)
         response = await asyncio.to_thread(
             generate_response, 
             history,
-            max_new_tokens=256,
-            temperature=0.7
+            **params
         )
         
         # Add bot response to conversation history
@@ -319,6 +346,64 @@ async def set_system_prompt(ctx, *, prompt: str = None):
         history.insert(0, {"role": "system", "content": prompt})
     
     await ctx.send(f"System prompt updated to: '{prompt}'")
+
+@bot.command(name='config')
+async def config_generation(ctx, param=None, value=None):
+    """Configure generation parameters for this channel"""
+    channel_id = ctx.channel.id
+    
+    # Get the current parameters for this channel
+    params = get_generation_params(channel_id)
+    
+    # If no param specified, show current config
+    if param is None:
+        param_list = '\n'.join([f"- **{k}**: `{v}`" for k, v in params.items()])
+        await ctx.send(f"Current generation parameters for this channel:\n{param_list}\n\n"
+                      f"Use `!config <parameter> <value>` to change a parameter.")
+        return
+    
+    # If param is 'reset', reset to defaults
+    if param.lower() == 'reset':
+        generation_params[channel_id] = DEFAULT_GENERATION_PARAMS.copy()
+        await ctx.send("Generation parameters reset to defaults.")
+        return
+    
+    # Check if the parameter exists
+    if param not in DEFAULT_GENERATION_PARAMS:
+        valid_params = '`, `'.join(DEFAULT_GENERATION_PARAMS.keys())
+        await ctx.send(f"Unknown parameter: `{param}`\nValid parameters: `{valid_params}`")
+        return
+    
+    # If no value specified, show current value
+    if value is None:
+        await ctx.send(f"Current value of `{param}`: `{params[param]}`")
+        return
+    
+    # Try to convert value to the appropriate type
+    current_value = params[param]
+    try:
+        if isinstance(current_value, bool):
+            if value.lower() in ('true', 'yes', '1', 'on'):
+                new_value = True
+            elif value.lower() in ('false', 'no', '0', 'off'):
+                new_value = False
+            else:
+                raise ValueError("Boolean value must be true/false, yes/no, 1/0, or on/off")
+        elif isinstance(current_value, int):
+            new_value = int(value)
+        elif isinstance(current_value, float):
+            new_value = float(value)
+        else:
+            new_value = value
+    except ValueError as e:
+        await ctx.send(f"Invalid value for `{param}`: {str(e)}")
+        return
+    
+    # Update the parameter
+    params[param] = new_value
+    generation_params[channel_id] = params
+    
+    await ctx.send(f"Updated `{param}` to `{new_value}`")
 
 @bot.command(name='engagement')
 @commands.is_owner()  # Restrict this command to the bot owner

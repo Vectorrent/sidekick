@@ -27,6 +27,10 @@ def main():
     print("  !chat <message> - Chat with the AI")
     print("  !clear - Clear conversation history")
     print("  !system <prompt> - Set a custom system prompt")
+    print("  !config - View and adjust text generation parameters")
+    print("  !config <param> - View a specific parameter")
+    print("  !config <param> <value> - Set a parameter value")
+    print("  !config reset - Reset parameters to default values")
     print("  !engagement - [Owner only] Check engagement level for debugging")
     print()
     print("Conversation Engagement Features:")
@@ -35,6 +39,12 @@ def main():
     print("  - Engagement naturally decays over time (~6 minutes)")
     print("  - Each channel has its own independent engagement level")
     print("  - The bot will always respond to direct @mentions and !chat commands")
+    print()
+    print("Text Generation Parameters:")
+    print("  - Each channel can have custom generation settings")
+    print("  - Parameters like temperature, top_p, top_k can be adjusted")
+    print("  - Changes persist until the bot is restarted")
+    print("  - Use !config to view and adjust parameters")
     print("=" * 50)
     
     # Run the bot
