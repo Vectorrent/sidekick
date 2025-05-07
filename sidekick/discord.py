@@ -43,6 +43,9 @@ RESPONSE_CONFIG = {
     "MIN_THRESHOLD": 0.01
 }
 
+# Discord message size limit (slightly below the actual 2000 for safety)
+DISCORD_MESSAGE_LIMIT = 1900
+
 # Maximum conversation history length
 MAX_HISTORY_LENGTH = 10
 
@@ -57,7 +60,7 @@ DEFAULT_GENERATION_PARAMS = {
     "temperature": 0.7,        # Controls randomness (0.0-1.0) - higher = more random
     # "top_p": 0.9,            # Nucleus sampling - keep tokens with cumulative probability >= top_p
     # "top_k": 50,             # Keep only the top k tokens - 0 means no filtering
-    "min_p": 0.02,             # Minimum token probability, which will be scaled by the probability of the most likely token.
+    # "min_p": 0.02,             # Minimum token probability, which will be scaled by the probability of the most likely token.
     "repetition_penalty": 1.1, # Penalty for repeating tokens (1.0 = no penalty)
     "do_sample": True,         # Whether to use sampling vs greedy decoding
     # "num_beams": 1,          # Number of beams for beam search (1 = no beam search)
@@ -215,6 +218,55 @@ async def before_decay_task():
     """Wait for the bot to be ready before starting the engagement decay task"""
     await bot.wait_until_ready()
 
+def split_long_message(message, max_length=DISCORD_MESSAGE_LIMIT):
+    """
+    Split a long message into smaller chunks while respecting line boundaries when possible.
+    
+    Args:
+        message (str): The message to split
+        max_length (int): Maximum length for each chunk
+        
+    Returns:
+        list: List of message chunks
+    """
+    # If message is already short enough, just return it
+    if len(message) <= max_length:
+        return [message]
+    
+    chunks = []
+    current_chunk = ""
+    lines = message.split('\n')
+    
+    for line in lines:
+        # If a single line is longer than max_length, we need to split it
+        if len(line) > max_length:
+            # If we already have content in the current chunk, add it to chunks and reset
+            if current_chunk:
+                chunks.append(current_chunk)
+                current_chunk = ""
+            
+            # Split long line by max_length
+            for i in range(0, len(line), max_length):
+                chunks.append(line[i:i + max_length])
+            
+        # If adding this line would make the chunk too long, start a new chunk
+        elif len(current_chunk) + len(line) + 1 > max_length:  # +1 for the newline
+            chunks.append(current_chunk)
+            current_chunk = line
+        
+        # Otherwise add to the current chunk
+        else:
+            if current_chunk:
+                current_chunk += '\n' + line
+            else:
+                current_chunk = line
+    
+    # Add any remaining chunk
+    if current_chunk:
+        chunks.append(current_chunk)
+    
+    return chunks
+
 # This event triggers on every message sent that the bot can see
 @bot.event
 async def on_message(message):
@@ -278,8 +330,12 @@ async def on_message(message):
             # Add bot response to conversation history
             add_to_conversation(message.channel.id, "assistant", response, is_dm=is_dm_channel)
             
-            # Send the response
-            await message.channel.send(response)
+            # Split the response if it's too long for Discord
+            message_chunks = split_long_message(response)
+            
+            # Send each chunk as a separate message
+            for chunk in message_chunks:
+                await message.channel.send(chunk)
     
     # IMPORTANT: Process commands if you're also using command system
     # Without this, your commands won't work when using on_message
@@ -324,8 +380,12 @@ async def chat(ctx, *, message: str = None):
         # Add bot response to conversation history
         add_to_conversation(ctx.channel.id, "assistant", response, is_dm=is_dm_channel)
         
-        # Send the response
-        await ctx.send(response)
+        # Split the response if it's too long for Discord
+        message_chunks = split_long_message(response)
+            
+        # Send each chunk as a separate message
+        for chunk in message_chunks:
+            await ctx.send(chunk)
 
 @bot.command(name='clear')
 async def clear_history(ctx):
