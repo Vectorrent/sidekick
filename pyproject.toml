@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sidekick"
+version = "0.1.0"
+description = "A Discord bot with SmolLM integration"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {file = "LICENSE"}
+authors = [
+    {name = "Sidekick Developer"}
+]
+dependencies = [
+    "python-dotenv",
+    "discord.py",
+    "torch",
+    "transformers",
+]
+
+[project.scripts]
+sidekick = "sidekick.main:main"
+
+[tool.setuptools]
+packages = ["sidekick"]
+
+[tool.black]
+line-length = 88
+target-version = ["py38"]
+
+[tool.isort]
+profile = "black"
+line_length = 88
