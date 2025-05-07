@@ -46,8 +46,9 @@ RESPONSE_CONFIG = {
 # Maximum conversation history length
 MAX_HISTORY_LENGTH = 10
 
-# System prompt for the AI
+# System prompts for the AI
 DEFAULT_SYSTEM_PROMPT = "You are an assistant named Samn. You are polite, knowledgeable, and concise."
+DM_SYSTEM_PROMPT = "You are an assistant named Samn. You are polite, knowledgeable, and concise. You are in a private, direct message conversation with a user. Be helpful, attentive, and personable."
 
 # Default generation parameters for LLM responses
 # These can be overridden per channel
@@ -79,20 +80,27 @@ async def on_ready():
     # Start the engagement decay task
     engagement_decay_task.start()
 
-def get_conversation_history(channel_id):
-    """Get conversation history for a specific channel"""
+def get_conversation_history(channel_id, is_dm=False):
+    """Get conversation history for a specific channel
+    
+    Args:
+        channel_id: The Discord channel ID
+        is_dm: Whether this is a direct message channel
+    """
     history = conversation_histories[channel_id]
     
     # Initialize with system prompt if empty
     if not history:
-        history.append({"role": "system", "content": DEFAULT_SYSTEM_PROMPT})
+        # Use DM-specific system prompt for direct message channels
+        system_prompt = DM_SYSTEM_PROMPT if is_dm else DEFAULT_SYSTEM_PROMPT
+        history.append({"role": "system", "content": system_prompt})
         conversation_histories[channel_id] = history
     
     return history
 
-def add_to_conversation(channel_id, role, content):
+def add_to_conversation(channel_id, role, content, is_dm=False):
     """Add a message to the conversation history for a channel"""
-    history = get_conversation_history(channel_id)
+    history = get_conversation_history(channel_id, is_dm=is_dm)
     history.append({"role": role, "content": content})
     
     # Trim history if it gets too long
@@ -149,10 +157,17 @@ def boost_engagement(channel_id, boost_amount):
     }
 
 def should_respond_to_message(message):
-    """Determine if the bot should respond to a message based on engagement level"""
+    """Determine if the bot should respond to a message based on engagement level and channel type"""
     channel_id = message.channel.id
     
-    # Get current engagement level for this channel
+    # Check if this is a DM/private channel (DMChannel instance)
+    is_dm_channel = isinstance(message.channel, discord.DMChannel)
+    
+    # Always respond in DM channels
+    if is_dm_channel:
+        return True
+    
+    # For non-DM channels, use engagement-based probability
     engagement_level = get_engagement_level(channel_id)
     
     # Calculate response chance based on engagement level
@@ -207,6 +222,9 @@ async def on_message(message):
     if message.author == bot.user:
         return
     
+    # Check if this is a DM/private channel (DMChannel instance)
+    is_dm_channel = isinstance(message.channel, discord.DMChannel)
+    
     # Flag to track if this is a direct mention
     is_direct_mention = bot.user.mentioned_in(message)
     should_respond = False
@@ -223,8 +241,14 @@ async def on_message(message):
         
         # Boost engagement level significantly
         boost_engagement(message.channel.id, RESPONSE_CONFIG["DIRECT_ENGAGEMENT_BOOST"])
+    elif is_dm_channel:
+        # This is a DM channel - always respond
+        should_respond = True
+        
+        # In DMs, always maintain full engagement
+        boost_engagement(message.channel.id, RESPONSE_CONFIG["DIRECT_ENGAGEMENT_BOOST"])
     else:
-        # Not a direct mention - check if we should randomly respond
+        # Not a direct mention or DM - check if we should randomly respond
         should_respond = should_respond_to_message(message)
         
         if should_respond:
@@ -236,10 +260,10 @@ async def on_message(message):
         # Send typing indicator
         async with message.channel.typing():
             # Add user message to conversation
-            add_to_conversation(message.channel.id, "user", f"{message.author.display_name}: {content}")
+            add_to_conversation(message.channel.id, "user", f"{message.author.display_name}: {content}", is_dm=is_dm_channel)
             
             # Get conversation history for this channel
-            history = get_conversation_history(message.channel.id)
+            history = get_conversation_history(message.channel.id, is_dm=is_dm_channel)
             
             # Get generation parameters for this channel
             params = get_generation_params(message.channel.id)
@@ -252,7 +276,7 @@ async def on_message(message):
             )
             
             # Add bot response to conversation history
-            add_to_conversation(message.channel.id, "assistant", response)
+            add_to_conversation(message.channel.id, "assistant", response, is_dm=is_dm_channel)
             
             # Send the response
             await message.channel.send(response)
@@ -273,16 +297,19 @@ async def chat(ctx, *, message: str = None):
         await ctx.send("Please provide a message to chat with the AI.")
         return
     
+    # Check if this is a DM channel
+    is_dm_channel = isinstance(ctx.channel, discord.DMChannel)
+    
     # Boost engagement level significantly - direct command is similar to a mention
     boost_engagement(ctx.channel.id, RESPONSE_CONFIG["DIRECT_ENGAGEMENT_BOOST"])
     
     # Send typing indicator
     async with ctx.typing():
         # Add user message to conversation
-        add_to_conversation(ctx.channel.id, "user", f"{ctx.author.display_name}: {message}")
+        add_to_conversation(ctx.channel.id, "user", f"{ctx.author.display_name}: {message}", is_dm=is_dm_channel)
         
         # Get conversation history for this channel
-        history = get_conversation_history(ctx.channel.id)
+        history = get_conversation_history(ctx.channel.id, is_dm=is_dm_channel)
         
         # Get generation parameters for this channel
         params = get_generation_params(ctx.channel.id)
@@ -295,7 +322,7 @@ async def chat(ctx, *, message: str = None):
         )
         
         # Add bot response to conversation history
-        add_to_conversation(ctx.channel.id, "assistant", response)
+        add_to_conversation(ctx.channel.id, "assistant", response, is_dm=is_dm_channel)
         
         # Send the response
         await ctx.send(response)
