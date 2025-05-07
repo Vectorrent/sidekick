@@ -12,7 +12,26 @@ intents = discord.Intents.default()
 intents.message_content = True  # Necessary to read message content
 
 # Create bot instance with command prefix
-bot = commands.Bot(command_prefix='!', intents=intents)
+class SidekickBot(commands.Bot):
+    async def setup_hook(self):
+        """A hook that is called when the bot is starting to sync commands and do setup"""
+        print("Setting up commands...")
+        # List existing commands (for debug purposes only)
+        for command in self.commands:
+            print(f"Command available: {command.name}")
+            
+        # Sync commands with Discord
+        print("Syncing commands with Discord...")
+        try:
+            # sync() will automatically register all slash commands
+            await self.tree.sync()
+            print("Commands synced successfully!")
+        except Exception as e:
+            print(f"Error syncing commands: {e}")
+            print("Commands will still be available as text commands with ! prefix")
+
+# Initialize the bot with our custom class
+bot = SidekickBot(command_prefix='!', intents=intents)
 
 # Dictionary to store conversation history for each channel
 # Format: {channel_id: [{"role": "...", "content": "..."}]}
@@ -49,9 +68,13 @@ DISCORD_MESSAGE_LIMIT = 1900
 # Maximum conversation history length
 MAX_HISTORY_LENGTH = 10
 
+# Logging settings
+ENABLE_LOGGING = False  # Enable prompt logging by default for debugging
+LOG_LEVEL = 1  # 0 = minimal, 1 = basic, 2 = detailed
+
 # System prompts for the AI
-DEFAULT_SYSTEM_PROMPT = "You are an assistant named Samn. You are polite, knowledgeable, and concise."
-DM_SYSTEM_PROMPT = "You are an assistant named Samn. You are polite, knowledgeable, and concise. You are in a private, direct message conversation with a user. Be helpful, attentive, and personable."
+DEFAULT_SYSTEM_PROMPT = "You are an AI researcher named Maya Chen. You are polite, knowledgeable, and concise."
+DM_SYSTEM_PROMPT = "You are an AI researcher named Maya Chen. You are polite, knowledgeable, and concise. You are in a private, direct message conversation with a user. Be helpful, attentive, and personable."
 
 # Default generation parameters for LLM responses
 # These can be overridden per channel
@@ -82,6 +105,11 @@ async def on_ready():
     
     # Start the engagement decay task
     engagement_decay_task.start()
+    
+    # Print registered commands
+    print("Registered commands:")
+    for command in bot.commands:
+        print(f"  !{command.name} - {command.help}")
 
 def get_conversation_history(channel_id, is_dm=False):
     """Get conversation history for a specific channel
@@ -218,6 +246,64 @@ async def before_decay_task():
     """Wait for the bot to be ready before starting the engagement decay task"""
     await bot.wait_until_ready()
 
+def log_prompt(history, level=LOG_LEVEL, channel_name="Unknown", author_name="Unknown"):
+    """
+    Log conversation history to the terminal
+    
+    Args:
+        history (list): List of message dicts with 'role' and 'content' keys
+        level (int): Log level (0=minimal, 1=basic, 2=detailed)
+        channel_name (str): Name of the Discord channel
+        author_name (str): Name of the message author
+    """
+    if not ENABLE_LOGGING:
+        return
+    
+    print("\n" + "="*50)
+    print(f"PROMPT LOG - Channel: {channel_name} - Author: {author_name}")
+    print("="*50)
+    
+    if level == 0:
+        # Minimal logging - just show the latest user message and system prompt
+        system_prompt = None
+        latest_user_message = None
+        
+        for msg in history:
+            if msg["role"] == "system":
+                system_prompt = msg["content"]
+            if msg["role"] == "user":
+                latest_user_message = msg["content"]
+        
+        if system_prompt:
+            print(f"SYSTEM: {system_prompt}")
+        if latest_user_message:
+            print(f"USER: {latest_user_message}")
+    
+    elif level == 1:
+        # Basic logging - show all messages
+        for i, msg in enumerate(history):
+            role = msg["role"].upper()
+            content = msg["content"]
+            # Truncate very long messages
+            if len(content) > 500:
+                content = content[:500] + "... [truncated]"
+            print(f"{i}. {role}: {content}")
+    
+    elif level == 2:
+        # Detailed logging - show all messages and full history
+        print("FULL CONVERSATION HISTORY:")
+        for i, msg in enumerate(history):
+            role = msg["role"].upper()
+            content = msg["content"]
+            print(f"{i}. {role}: {content}")
+        
+        # Also print raw history for debugging
+        print("\nRAW HISTORY:")
+        import json
+        print(json.dumps(history, indent=2))
+    
+    print("="*50 + "\n")
+
 def split_long_message(message, max_length=DISCORD_MESSAGE_LIMIT):
     """
     Split a long message into smaller chunks while respecting line boundaries when possible.
@@ -273,6 +359,10 @@ async def on_message(message):
     # Don't respond to our own messages to prevent infinite loops
     if message.author == bot.user:
         return
+        
+    # IMPORTANT: Process commands first to ensure they work properly
+    # This must be at the beginning of on_message
+    await bot.process_commands(message)
     
     # Check if this is a DM/private channel (DMChannel instance)
     is_dm_channel = isinstance(message.channel, discord.DMChannel)
@@ -317,6 +407,10 @@ async def on_message(message):
             # Get conversation history for this channel
             history = get_conversation_history(message.channel.id, is_dm=is_dm_channel)
             
+            # Log prompt to terminal if logging is enabled
+            channel_name = message.channel.name if hasattr(message.channel, 'name') else "DM"
+            log_prompt(history, channel_name=channel_name, author_name=message.author.display_name)
+            
             # Get generation parameters for this channel
             params = get_generation_params(message.channel.id)
             
@@ -337,16 +431,21 @@ async def on_message(message):
             for chunk in message_chunks:
                 await message.channel.send(chunk)
     
-    # IMPORTANT: Process commands if you're also using command system
-    # Without this, your commands won't work when using on_message
-    await bot.process_commands(message)
+    # NOTE: We're already processing commands at the beginning of this function
+    # This was moved to ensure commands are processed before any AI response logic
 
-@bot.command(name='ping')
+@bot.hybrid_command(
+    name='ping',
+    description='Check if the bot is responsive'
+)
 async def ping(ctx):
     """Simple command that responds with 'Pong!' to check if bot is responsive"""
     await ctx.send('Pong!')
 
-@bot.command(name='chat')
+@bot.hybrid_command(
+    name='chat',
+    description='Chat with the AI model'
+)
 async def chat(ctx, *, message: str = None):
     """Chat with the AI model"""
     if not message:
@@ -366,6 +465,10 @@ async def chat(ctx, *, message: str = None):
         
         # Get conversation history for this channel
         history = get_conversation_history(ctx.channel.id, is_dm=is_dm_channel)
+        
+        # Log prompt to terminal if logging is enabled
+        channel_name = ctx.channel.name if hasattr(ctx.channel, 'name') else "DM"
+        log_prompt(history, channel_name=channel_name, author_name=ctx.author.display_name)
         
         # Get generation parameters for this channel
         params = get_generation_params(ctx.channel.id)
@@ -387,7 +490,10 @@ async def chat(ctx, *, message: str = None):
         for chunk in message_chunks:
             await ctx.send(chunk)
 
-@bot.command(name='clear')
+@bot.hybrid_command(
+    name='clear',
+    description='Clear the conversation history for the current channel'
+)
 async def clear_history(ctx):
     """Clear the conversation history for the current channel"""
     if ctx.channel.id in conversation_histories:
@@ -408,7 +514,10 @@ async def clear_history(ctx):
     else:
         await ctx.send("No conversation history to clear.")
 
-@bot.command(name='system')
+@bot.hybrid_command(
+    name='system',
+    description='Set a custom system prompt for the AI in the current channel'
+)
 async def set_system_prompt(ctx, *, prompt: str = None):
     """Set a custom system prompt for the AI in the current channel"""
     if not prompt:
@@ -434,7 +543,10 @@ async def set_system_prompt(ctx, *, prompt: str = None):
     
     await ctx.send(f"System prompt updated to: '{prompt}'")
 
-@bot.command(name='config')
+@bot.hybrid_command(
+    name='config',
+    description='Configure text generation parameters for this channel'
+)
 async def config_generation(ctx, param=None, value=None):
     """Configure generation parameters for this channel"""
     channel_id = ctx.channel.id
@@ -492,7 +604,55 @@ async def config_generation(ctx, param=None, value=None):
     
     await ctx.send(f"Updated `{param}` to `{new_value}`")
 
-@bot.command(name='engagement')
+@bot.hybrid_command(
+    name='logging',
+    description='Toggle prompt logging to terminal (owner only)'
+)
+@commands.is_owner()  # Restrict this command to the bot owner
+async def toggle_logging(ctx, setting=None, level=None):
+    """Toggle prompt logging to terminal (owner only)"""
+    global ENABLE_LOGGING, LOG_LEVEL
+    
+    # If no setting provided, show current status
+    if setting is None:
+        await ctx.send(f"Logging is currently **{'enabled' if ENABLE_LOGGING else 'disabled'}**\n"
+                      f"Log level: **{LOG_LEVEL}**\n\n"
+                      f"Use `!logging on/off` to toggle logging\n"
+                      f"Use `!logging level 0/1/2` to set log level")
+        return
+    
+    # Handle setting the log level
+    if setting.lower() == 'level':
+        if level is None:
+            await ctx.send(f"Current log level: **{LOG_LEVEL}**\n"
+                         f"0 = minimal, 1 = basic, 2 = detailed")
+            return
+        
+        try:
+            level_int = int(level)
+            if 0 <= level_int <= 2:
+                LOG_LEVEL = level_int
+                await ctx.send(f"Log level set to **{LOG_LEVEL}**")
+            else:
+                await ctx.send("Log level must be 0, 1, or 2")
+        except ValueError:
+            await ctx.send("Log level must be a number (0, 1, or 2)")
+        return
+    
+    # Handle toggling logging on/off
+    if setting.lower() in ['on', 'true', 'enable', 'yes', '1']:
+        ENABLE_LOGGING = True
+        await ctx.send("Prompt logging **enabled**")
+    elif setting.lower() in ['off', 'false', 'disable', 'no', '0']:
+        ENABLE_LOGGING = False
+        await ctx.send("Prompt logging **disabled**")
+    else:
+        await ctx.send("Invalid setting. Use `on` or `off`")
+
+@bot.hybrid_command(
+    name='engagement',
+    description='Check the current engagement level for this channel (owner only)'
+)
 @commands.is_owner()  # Restrict this command to the bot owner
 async def check_engagement(ctx):
     """Check the current engagement level for this channel (debug command)"""

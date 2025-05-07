@@ -1,9 +1,11 @@
 import os
 import sys
-from sidekick.discord import bot
+import asyncio
+from sidekick.discord import bot, ENABLE_LOGGING
 from dotenv import load_dotenv
 
-def main():
+async def run_bot():
+    """Run the Discord bot with proper command syncing"""
     # Print welcome banner
     print("=" * 50)
     print("Sidekick Discord Bot with SmolLM Integration")
@@ -32,6 +34,9 @@ def main():
     print("  !config <param> <value> - Set a parameter value")
     print("  !config reset - Reset parameters to default values")
     print("  !engagement - [Owner only] Check engagement level for debugging")
+    print("  !logging - [Owner only] Show logging status")
+    print("  !logging on/off - [Owner only] Enable/disable prompt logging")
+    print("  !logging level 0/1/2 - [Owner only] Set logging detail level")
     print()
     print("Conversation Engagement Features:")
     print("  - The bot has a small random chance to respond to any message")
@@ -45,10 +50,33 @@ def main():
     print("  - Parameters like temperature, top_p, top_k can be adjusted")
     print("  - Changes persist until the bot is restarted")
     print("  - Use !config to view and adjust parameters")
+    print()
+    print("Debugging Features:")
+    print("  - Prompt logging to terminal for debugging AI responses")
+    print("  - Three levels of logging detail (0=minimal, 1=basic, 2=detailed)")
+    print("  - Toggle logging with !logging command (owner-only)")
+    print("  - All prompts and system messages visible in terminal when enabled")
     print("=" * 50)
     
-    # Run the bot
-    bot.run(TOKEN)
+    # Enable logging by default in development mode
+    if os.getenv('DEVELOPMENT') == 'true':
+        global ENABLE_LOGGING
+        ENABLE_LOGGING = True
+        print("Development mode: Prompt logging enabled by default")
+    
+    # Run the bot with the provided token
+    await bot.start(TOKEN)
+
+def main():
+    """Main entry point that properly handles asyncio"""
+    try:
+        # Run the bot using asyncio
+        asyncio.run(run_bot())
+    except KeyboardInterrupt:
+        print("Bot shutting down...")
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
