@@ -6,7 +6,7 @@ import time
 from discord.ext import commands, tasks
 from collections import defaultdict
 from sidekick.chat import load_model, generate_response
-from sidekick.rl_pipeline import (
+from sidekick.rl_pipeline_ppo import (
     add_feedback, 
     process_feedback_queue, 
     get_metrics, 

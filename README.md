@@ -61,16 +61,17 @@ python -m sidekick.chat
 
 ## Reinforcement Learning Integration
 
-The bot includes a custom RL implementation with LoRA parameter-efficient fine-tuning:
+The bot includes PPO-based reinforcement learning with LoRA parameter-efficient fine-tuning:
 
-- Uses the PEFT library for LoRA adapters
+- Uses TRL library for Proximal Policy Optimization (PPO)
+- Uses PEFT library for LoRA adapters (parameter-efficient training)
 - Supports online single-step RL training from user feedback
 - Feedback can be provided through:
-  - Explicit ratings via the `!feedback` command
-  - Comment sentiment analysis from users
-- Training metrics can be viewed with the `!rl_metrics` command
+  - Direct ratings via the `/good_bot` and `/bad_bot` commands
+  - Optional comment sentiment analysis
+- Uses the base model (adapter disabled) as reference for KL divergence penalty
+- Training metrics can be viewed with the `/rl_metrics` command
 - LoRA adapters are automatically saved after every 100 training steps
-- Every bot response is added to a feedback queue for potential training
 
 ## Conversation Engagement System
 

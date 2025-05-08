@@ -2,5 +2,6 @@ __pycache__
 .env
 .venv
 *.egg-info
+*.json
 build
 CLAUDE.md

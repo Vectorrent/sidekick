@@ -164,41 +164,34 @@ def setup_feedback_slash_commands(bot):
         # Format the metrics for display
         embed = discord.Embed(
             title="Reinforcement Learning Metrics",
-            description="Current training statistics",
+            description="Current PPO training statistics",
             color=0x00ff00
         )
         
         # Add general stats
         embed.add_field(
-            name="Training Stats",
+            name="Feedback Stats",
             value=(
                 f"**Total Feedback**: {metrics['total_feedback']}\n"
-                f"**Training Steps**: {metrics['total_training_steps']}\n"
-                f"**Avg Reward**: {metrics['avg_reward']:.4f}\n"
+                f"**Positive Feedback**: {metrics['positive_feedback']}\n"
+                f"**Negative Feedback**: {metrics['negative_feedback']}\n"
+                f"**Neutral Feedback**: {metrics['neutral_feedback']}\n"
             ),
             inline=False
         )
         
-        # Add feedback breakdown
-        embed.add_field(
-            name="Feedback Breakdown",
-            value=(
-                f"**Positive**: {metrics['positive_feedback']} "
-                f"({100 * metrics['positive_feedback'] / max(1, metrics['total_feedback']):.1f}%)\n"
-                f"**Neutral**: {metrics['neutral_feedback']} "
-                f"({100 * metrics['neutral_feedback'] / max(1, metrics['total_feedback']):.1f}%)\n"
-                f"**Negative**: {metrics['negative_feedback']} "
-                f"({100 * metrics['negative_feedback'] / max(1, metrics['total_feedback']):.1f}%)\n"
-            ),
-            inline=False
-        )
-        
-        # Loss if available
-        if metrics['recent_losses']:
-            avg_loss = sum(metrics['recent_losses']) / len(metrics['recent_losses'])
+        # Add PPO stats if available
+        if 'ppo_stats' in metrics:
+            ppo = metrics['ppo_stats']
             embed.add_field(
-                name="Recent Training",
-                value=f"**Avg Loss**: {avg_loss:.4f}\n",
+                name="PPO Training Stats",
+                value=(
+                    f"**Total Steps**: {ppo['total_steps']}\n"
+                    f"**Avg Reward**: {ppo['avg_reward']:.4f}\n"
+                    f"**Avg Policy Loss**: {ppo['avg_policy_loss']:.6f if ppo['avg_policy_loss'] is not None else 'N/A'}\n"
+                    f"**Avg Value Loss**: {ppo['avg_value_loss']:.6f if ppo['avg_value_loss'] is not None else 'N/A'}\n"
+                    f"**Avg KL Divergence**: {ppo['avg_kl_div']:.6f if ppo['avg_kl_div'] is not None else 'N/A'}\n"
+                ),
                 inline=False
             )
         
