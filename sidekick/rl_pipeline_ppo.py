@@ -602,10 +602,41 @@ def get_metrics() -> Dict[str, Any]:
     # Get PPO stats
     ppo_stats = get_stats()
     
+    # Get learning progress metrics from ppo_trainer
+    from sidekick.ppo_trainer import learning_stats, total_training_steps
+    
+    # Calculate learning progress indicators
+    learning_progress = {
+        "total_steps": total_training_steps,
+        "positive_rewards": learning_stats["positive_rewards"],
+        "negative_rewards": learning_stats["negative_rewards"],
+        "neutral_rewards": learning_stats["neutral_rewards"],
+        "avg_loss": learning_stats["avg_loss"] if "avg_loss" in learning_stats else 0,
+        "avg_grad_norm": learning_stats["avg_grad_norm"] if "avg_grad_norm" in learning_stats else 0,
+    }
+    
+    # Calculate loss trend (is loss decreasing?)
+    if "loss_history" in learning_stats and len(learning_stats["loss_history"]) > 20:
+        # Compare early losses with recent losses to see if there's improvement
+        early_losses = learning_stats["loss_history"][:10]
+        recent_losses = learning_stats["loss_history"][-10:]
+        avg_early = sum(early_losses) / len(early_losses) if early_losses else 0
+        avg_recent = sum(recent_losses) / len(recent_losses) if recent_losses else 0
+        loss_change = avg_recent - avg_early
+        loss_change_pct = (loss_change / avg_early * 100) if avg_early > 0 else 0
+        
+        learning_progress["loss_trend"] = {
+            "early_avg": avg_early,
+            "recent_avg": avg_recent,
+            "change_pct": loss_change_pct,
+            "improving": loss_change < 0  # Loss decreasing means improving
+        }
+    
     # Combine with feedback stats
     combined_stats = {
         **feedback_stats,
-        "ppo_stats": ppo_stats
+        "ppo_stats": ppo_stats,
+        "learning_progress": learning_progress
     }
     
     return combined_stats

@@ -180,6 +180,37 @@ def setup_feedback_slash_commands(bot):
             inline=False
         )
         
+        # Add learning progress metrics if available
+        if 'learning_progress' in metrics:
+            lp = metrics['learning_progress']
+            
+            # Create a special learning trend indicator
+            trend_indicator = "➖"  # Default neutral
+            if 'loss_trend' in lp:
+                trend = lp['loss_trend']
+                if trend['improving']:
+                    # How much improvement
+                    if trend['change_pct'] < -5:
+                        trend_indicator = "🟢 Strong improvement!"
+                    else:
+                        trend_indicator = "🟩 Improving"
+                elif trend['change_pct'] > 5:
+                    trend_indicator = "🟥 Not improving"
+                else:
+                    trend_indicator = "⬛ Stable (not much change)"
+            
+            embed.add_field(
+                name="Learning Progress",
+                value=(
+                    f"**Total Steps**: {lp['total_steps']}\n"
+                    f"**Rewards**: +{lp['positive_rewards']} | 0:{lp['neutral_rewards']} | -:{lp['negative_rewards']}\n"
+                    f"**Avg Loss**: {lp['avg_loss']:.4f}\n"
+                    f"**Learning Trend**: {trend_indicator}\n"
+                    f"**Avg Gradient**: {lp['avg_grad_norm']:.4f}\n"
+                ),
+                inline=False
+            )
+        
         # Add PPO stats if available
         if 'ppo_stats' in metrics:
             ppo = metrics['ppo_stats']

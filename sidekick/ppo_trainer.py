@@ -16,6 +16,18 @@ stats_history = []
 total_training_steps = 0
 max_history = 50
 
+# Learning tracking
+learning_stats = {
+    "positive_rewards": 0,
+    "negative_rewards": 0,
+    "neutral_rewards": 0,
+    "avg_loss": 0,
+    "avg_grad_norm": 0,
+    "loss_history": [],  # Store recent losses
+    "last_reported_step": 0,
+    "start_time": None
+}
+
 def initialize_ppo_trainer(
     model,
     tokenizer_obj,
@@ -51,6 +63,29 @@ def initialize_ppo_trainer(
     
     # Set model in training mode
     model.train()
+    
+    # Verify that we have trainable parameters
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
+    total_trainable_params = sum(p.numel() for p in trainable_params)
+    print(f"Model has {total_trainable_params:,} trainable parameters")
+    
+    if total_trainable_params == 0:
+        print("WARNING: No trainable parameters found! Model will not learn anything.")
+        print("Make sure LoRA adapters are correctly attached and not frozen.")
+    else:
+        lora_params = []
+        for name, param in model.named_parameters():
+            if 'lora' in name.lower() and param.requires_grad:
+                lora_params.append((name, param.numel()))
+        
+        if lora_params:
+            print(f"Found {len(lora_params)} LoRA parameter groups:")
+            for name, count in lora_params[:5]:  # Show first 5
+                print(f"  - {name}: {count:,} parameters")
+            if len(lora_params) > 5:
+                print(f"  - ... and {len(lora_params)-5} more groups")
+        else:
+            print("WARNING: No LoRA parameters found! Check adapter configuration.")
 
     # Create reference model state dict
     # Only create a clone if the model has adapter methods
@@ -77,7 +112,19 @@ def initialize_ppo_trainer(
         def __init__(self, model, tokenizer):
             self.model = model
             self.tokenizer = tokenizer
-            self.optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+            
+            # Only optimize trainable parameters (should be just LoRA weights)
+            trainable_params = [p for p in model.parameters() if p.requires_grad]
+            
+            if not trainable_params:
+                print("CRITICAL ERROR: No trainable parameters found for optimizer!")
+                print("Will attempt to add all parameters, but this is likely incorrect")
+                trainable_params = model.parameters()
+            
+            # Create optimizer with just the trainable parameters
+            print(f"Creating optimizer for {sum(p.numel() for p in trainable_params):,} trainable parameters")
+            self.optimizer = torch.optim.AdamW(trainable_params, lr=learning_rate)
+            
             self.device = next(model.parameters()).device  # Get device from model
             
             # Store reference to the accelerator for compatibility
@@ -273,10 +320,61 @@ def initialize_ppo_trainer(
                 self.optimizer.zero_grad()
                 scaled_loss.backward()
                 
+                # Calculate gradient norm for monitoring
+                total_norm = 0
+                for p in self.model.parameters():
+                    if p.grad is not None:
+                        param_norm = p.grad.detach().data.norm(2)
+                        total_norm += param_norm.item() ** 2
+                grad_norm = total_norm ** 0.5
+                
                 # Gradient clipping to prevent exploding gradients
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
                 
+                # Update learning stats
+                global learning_stats
+                learning_stats["loss_history"].append(loss.item())
+                if len(learning_stats["loss_history"]) > 100:  # Keep only recent history
+                    learning_stats["loss_history"] = learning_stats["loss_history"][-100:]
+                learning_stats["avg_loss"] = sum(learning_stats["loss_history"]) / len(learning_stats["loss_history"])
+                learning_stats["avg_grad_norm"] = (learning_stats.get("avg_grad_norm", 0) * 0.9) + (grad_norm * 0.1)  # Exponential moving average
+                
+                # Log learning progress
+                print(f"[LEARNING] loss={loss.item():.4f}, scaled_loss={scaled_loss.item():.4f}, " +
+                      f"reward={reward:.2f}, grad_norm={grad_norm:.2f}, reward_factor={reward_factor:.2f}")
+                
+                # Take optimizer step
                 self.optimizer.step()
+                
+                # Sample a couple of parameters to monitor their change
+                # Focus ONLY on LoRA adapter parameters that are trainable
+                param_changes = []
+                trainable_params = []
+                
+                # Find trainable parameters (specifically LoRA adapter weights)
+                for name, param in self.model.named_parameters():
+                    if param.requires_grad:
+                        # Look specifically for LoRA parameters
+                        if 'lora' in name.lower():
+                            trainable_params.append((name, param))
+                
+                # If no LoRA params found, fall back to any trainable params
+                if not trainable_params:
+                    trainable_params = [(name, param) for name, param in self.model.named_parameters() 
+                                        if param.requires_grad]
+                
+                # Log changes for up to 3 trainable parameters
+                for name, param in trainable_params[:3]:
+                    if hasattr(param, '_pre_update_value'):
+                        change = (param.data - param._pre_update_value).abs().mean().item()
+                        param_changes.append(f"{name}: {change:.8f}")
+                    # Store current values for next comparison
+                    param._pre_update_value = param.data.clone()
+                
+                if param_changes:
+                    print(f"[PARAM CHANGES (LoRA)] {', '.join(param_changes)}")
+                else:
+                    print("[WARNING] No trainable parameters found to track changes!")
                 
                 # Return training stats
                 return {
@@ -325,7 +423,31 @@ def train_step(
     Returns:
         Training statistics
     """
-    global ppo_trainer, tokenizer, stats_history, total_training_steps
+    global ppo_trainer, tokenizer, stats_history, total_training_steps, learning_stats
+    
+    # Initialize start time if not already set
+    if learning_stats["start_time"] is None:
+        learning_stats["start_time"] = time.time()
+    
+    # Track reward category
+    if reward > 0.1:
+        learning_stats["positive_rewards"] += 1
+    elif reward < -0.1:
+        learning_stats["negative_rewards"] += 1
+    else:
+        learning_stats["neutral_rewards"] += 1
+    
+    # Print periodic progress report
+    if (total_training_steps % 10 == 0 and 
+        total_training_steps > learning_stats["last_reported_step"]):
+        elapsed_time = time.time() - learning_stats["start_time"]
+        avg_loss = sum(learning_stats["loss_history"][-50:]) / max(1, len(learning_stats["loss_history"][-50:]))
+        print(f"===== TRAINING PROGRESS =====")
+        print(f"Steps: {total_training_steps} | Time: {elapsed_time:.1f}s | Avg Loss: {avg_loss:.4f}")
+        print(f"Rewards: +{learning_stats['positive_rewards']} | 0: {learning_stats['neutral_rewards']} | -: {learning_stats['negative_rewards']}")
+        print(f"Steps/min: {total_training_steps / (elapsed_time/60):.1f}")
+        print(f"=============================")
+        learning_stats["last_reported_step"] = total_training_steps
     
     if ppo_trainer is None or tokenizer is None:
         print("Trainer or tokenizer not initialized, skipping training step")
