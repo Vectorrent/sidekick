@@ -519,7 +519,7 @@ def train_step(
             stats_history = stats_history[-max_history:]
         
         # Save periodically
-        if total_training_steps % 100 == 0:
+        if total_training_steps % 10 == 0:
             save_stats_history()
             # Also save model
             save_model()
@@ -544,7 +544,7 @@ def train_step(
             "ppo_error": str(e)
         }
 
-def save_model(path="./rl_model"):
+def save_model(path="./model"):
     """
     Save the model with adapters
 

@@ -5,3 +5,4 @@ __pycache__
 *.json
 build
 CLAUDE.md
+model

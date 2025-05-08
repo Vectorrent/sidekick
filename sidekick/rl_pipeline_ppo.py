@@ -33,7 +33,7 @@ feedback_stats = {
 }
 
 # Save interval
-SAVE_INTERVAL = 100
+SAVE_INTERVAL = 10
 
 class FeedbackRecord:
     """
@@ -192,7 +192,7 @@ def compute_reward(response: str, user_feedback: Optional[str] = None, binary_ra
     
     return final_score
 
-async def load_model_for_ppo(model_name="HuggingFaceTB/SmolLM2-135M-Instruct", adapter_path="./rl_model"):
+async def load_model_for_ppo(model_name="HuggingFaceTB/SmolLM2-135M-Instruct", adapter_path="./model"):
     """
     Load model with LoRA for PPO training
     

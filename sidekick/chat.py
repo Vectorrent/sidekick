@@ -14,7 +14,7 @@ tokenizer = None
 device = None
 is_peft_model = False
 
-def load_model(model_name="HuggingFaceTB/SmolLM2-135M-Instruct", adapter_path="./rl_model"):
+def load_model(model_name="HuggingFaceTB/SmolLM2-135M-Instruct", adapter_path="./model"):
     """
     Load the LLM model and tokenizer with PEFT adapters if available
     

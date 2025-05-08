@@ -71,7 +71,7 @@ The bot includes PPO-based reinforcement learning with LoRA parameter-efficient 
   - Optional comment sentiment analysis
 - Uses the base model (adapter disabled) as reference for KL divergence penalty
 - Training metrics can be viewed with the `/rl_metrics` command
-- LoRA adapters are automatically saved after every 100 training steps
+- LoRA adapters are automatically saved after every 10 training steps
 
 ## Conversation Engagement System
 
