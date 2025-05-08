@@ -101,7 +101,7 @@ DM_SYSTEM_PROMPT = DEFAULT_SYSTEM_PROMPT
 # These can be overridden per channel
 DEFAULT_GENERATION_PARAMS = {
     "max_new_tokens": 512,     # Maximum length of generated text
-    "temperature": 0.45,        # Controls randomness (0.0-1.0) - higher = more random
+    "temperature": 0.15,        # Controls randomness (0.0-1.0) - higher = more random
     # "top_p": 0.9,            # Nucleus sampling - keep tokens with cumulative probability >= top_p
     # "top_k": 50,             # Keep only the top k tokens - 0 means no filtering
     # "min_p": 0.02,             # Minimum token probability, which will be scaled by the probability of the most likely token.

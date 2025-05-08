@@ -112,7 +112,7 @@ def generate_response(messages, **generation_kwargs):
         # Set default generation parameters if not provided
         default_params = {
             'max_new_tokens': 256,
-            'temperature': 0.7,
+            'temperature': 0.15,
             'do_sample': True,
             'pad_token_id': tokenizer.eos_token_id
         }
