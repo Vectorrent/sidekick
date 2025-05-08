@@ -97,7 +97,7 @@ def compute_reward(response: str, user_feedback: Optional[str] = None, binary_ra
     if binary_rating is not None:
         return 1.0 if binary_rating > 0 else -1.0
     
-    # If user feedback available, we can use simple heuristics 
+    # If user feedback available, use simple heuristics 
     if user_feedback:
         # Extremely simple sentiment analysis - just a placeholder
         positive_words = ["good", "great", "excellent", "helpful", "thanks", "thank", "nice", "perfect"]
@@ -115,8 +115,82 @@ def compute_reward(response: str, user_feedback: Optional[str] = None, binary_ra
             return 0.0
         return (positive_count - negative_count) / total
     
-    # Default: neutral reward
-    return 0.0
+    # ======= Automatic reward heuristics =======
+    # When no explicit feedback is provided, we can use these heuristics
+    # to provide automatic rewards based on response quality
+    
+    # 1. Length-based: too short or too long responses are less ideal
+    response_length = len(response.strip())
+    length_score = 0.0
+    
+    if response_length < 20:  # Too short
+        length_score = -0.3
+    elif 50 <= response_length <= 500:  # Good length range
+        length_score = 0.3
+    elif response_length > 1000:  # Too long
+        length_score = -0.2
+    
+    # 2. Quality heuristics
+    quality_score = 0.0
+    
+    try:
+        # Check for repetition (a simple heuristic - repeated phrases are often a sign of poor quality)
+        words = response.lower().split()
+        if len(words) > 5:
+            # Check for repeated n-grams (phrases)
+            trigrams = [' '.join(words[i:i+3]) for i in range(len(words)-2)]
+            unique_trigrams = set(trigrams)
+            
+            # If there are significantly fewer unique trigrams than total trigrams, that indicates repetition
+            if len(trigrams) > 0:
+                repetition_ratio = len(unique_trigrams) / len(trigrams)
+                if repetition_ratio < 0.7:  # High repetition
+                    quality_score -= 0.4
+                elif repetition_ratio > 0.9:  # Low repetition (good diversity)
+                    quality_score += 0.2
+        
+        # Check for coherence markers (rudimentary)
+        coherence_markers = ["first", "second", "however", "therefore", "additionally", "moreover", "in conclusion"]
+        coherence_count = sum(1 for marker in coherence_markers if marker in response.lower())
+        if coherence_count > 0:
+            quality_score += min(0.3, coherence_count * 0.1)  # Cap at 0.3
+            
+        # Check for sentence structure diversity (basic approach)
+        sentences = [s.strip() for s in response.split('.') if s.strip()]
+        if len(sentences) >= 2:
+            # Get sentence starts (first 3 words)
+            sentence_starts = []
+            for sentence in sentences:
+                words = sentence.split()
+                if words:
+                    start = ' '.join(words[:min(3, len(words))])
+                    sentence_starts.append(start)
+            
+            # Calculate unique sentence starts ratio 
+            unique_starts_ratio = len(set(sentence_starts)) / len(sentence_starts) if sentence_starts else 0
+            if unique_starts_ratio > 0.8:  # Good variety in sentence structure
+                quality_score += 0.2
+            elif unique_starts_ratio < 0.5 and len(sentences) > 3:  # Poor variety
+                quality_score -= 0.2
+                
+        # Check for question-answer pattern (good for engagement)
+        if "?" in response and len(sentences) > 1:
+            # Simple check if bot asks a question and then answers it
+            quality_score += 0.15
+            
+    except Exception as e:
+        # If any errors in quality heuristics, skip and log
+        print(f"Error in quality heuristics: {e}")
+        quality_score = 0.0
+    
+    # 3. Combine scores and clamp to [-1, 1] range
+    final_score = (length_score + quality_score) / 2
+    final_score = max(-1.0, min(1.0, final_score))  # Clamp to [-1, 1]
+    
+    # Log the computed score components
+    print(f"Auto-reward components: length={length_score:.2f}, quality={quality_score:.2f}, final={final_score:.2f}")
+    
+    return final_score
 
 async def load_model_for_ppo(model_name="HuggingFaceTB/SmolLM2-135M-Instruct", adapter_path="./rl_model"):
     """

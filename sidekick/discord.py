@@ -466,9 +466,11 @@ async def on_message(message):
             add_to_conversation(message.channel.id, "assistant", response, is_dm=is_dm_channel)
             
             # Add to RL feedback queue (automatically will be processed by task)
+            # Pass an empty string as user_feedback to ensure it uses the automatic rewarder
             add_feedback(
                 conversation=history.copy(), 
                 response=response,
+                user_feedback="",  # Empty string so compute_reward knows to use automatic rewards
                 channel_id=str(message.channel.id)
             )
             
@@ -537,9 +539,11 @@ async def chat(interaction: discord.Interaction, message: str):
     add_to_conversation(interaction.channel_id, "assistant", response, is_dm=is_dm_channel)
     
     # Add to RL feedback queue (automatically will be processed by task)
+    # Pass an empty string as user_feedback to ensure it uses the automatic rewarder
     add_feedback(
         conversation=history.copy(), 
         response=response,
+        user_feedback="",  # Empty string so compute_reward knows to use automatic rewards
         channel_id=str(interaction.channel_id)
     )
     
