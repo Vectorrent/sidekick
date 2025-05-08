@@ -294,6 +294,9 @@ def add_feedback(
     global feedback_queue, feedback_stats
     
     try:
+        # Log feedback details
+        print(f"Adding feedback to queue: binary_rating={binary_rating}, user_feedback='{user_feedback}'")
+        
         # Create feedback record
         record = FeedbackRecord(
             conversation=conversation,
@@ -305,6 +308,7 @@ def add_feedback(
         
         # Add to queue
         feedback_queue.append(record)
+        print(f"Feedback added to queue (queue size: {len(feedback_queue)})")
         
         # Update stats 
         feedback_stats["total_feedback"] += 1
@@ -333,12 +337,14 @@ async def process_single_feedback(record: FeedbackRecord) -> Dict[str, Any]:
     global model, tokenizer
     
     try:
-        # Compute reward
+        # Compute reward with explicit debug logging
+        print(f"Processing feedback with binary_rating={record.binary_rating}, user_feedback='{record.user_feedback}'")
         reward = compute_reward(
             response=record.response,
             user_feedback=record.user_feedback,
             binary_rating=record.binary_rating
         )
+        print(f"Computed reward: {reward}")
         
         # Update feedback stats
         feedback_stats["total_feedback"] += 1
@@ -395,6 +401,9 @@ async def process_feedback_queue() -> int:
         int: Number of feedback items processed
     """
     global feedback_queue, model
+    
+    # Log when the queue processing runs
+    print(f"Processing feedback queue with {len(feedback_queue)} items ({sum(1 for r in feedback_queue if not r.processed)} unprocessed)")
     
     processed_count = 0
     

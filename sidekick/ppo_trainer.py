@@ -88,8 +88,10 @@ def initialize_ppo_trainer(
             try:
                 # Encode inputs with better error handling and batch size alignment
                 try:
-                    # Process query text with fixed size
-                    max_query_length = 512
+                    # Process query text with more reasonable fixed size
+                    # The "batch size mismatch" error is actually about sequence length
+                    # Let's use more moderate lengths to reduce the risk of mismatch
+                    max_query_length = 256  # Reduced from 512
                     max_response_length = 256
                     
                     # Tokenize with careful truncation and padding
@@ -153,19 +155,31 @@ def initialize_ppo_trainer(
                     
                     # Try to detect model's expected format for labels
                     try:
-                        # First ensure batch sizes match to prevent the common mismatch error
-                        input_batch_size = model_forward_params['input_ids'].size(0)
-                        label_batch_size = labels['input_ids'].size(0)
+                        # Check dimensions - we need to handle sequence length mismatches 
+                        # The error "Expected input batch_size (X) to match target batch_size (Y)" is actually 
+                        # referring to sequence length, not batch size
+                        input_seq_len = model_forward_params['input_ids'].size(1)
+                        label_seq_len = labels['input_ids'].size(1)
                         
-                        if input_batch_size != label_batch_size:
-                            print(f"Fixing input/label batch size mismatch before forward pass: input={input_batch_size}, label={label_batch_size}")
-                            # Use the smaller batch size for both
-                            min_batch_size = min(input_batch_size, label_batch_size)
-                            if min_batch_size > 0:
-                                model_forward_params['input_ids'] = model_forward_params['input_ids'][:min_batch_size]
-                                if 'attention_mask' in model_forward_params:
-                                    model_forward_params['attention_mask'] = model_forward_params['attention_mask'][:min_batch_size]
-                                labels['input_ids'] = labels['input_ids'][:min_batch_size]
+                        # Ensure input and label sequence lengths match
+                        if input_seq_len != label_seq_len:
+                            print(f"Fixing sequence length mismatch before forward pass: input={input_seq_len}, label={label_seq_len}")
+                            
+                            # Create new labels with input sequence length for direct causal LM training
+                            # This is needed because many models expect input and label tensors to have the same seq length
+                            new_labels = torch.full_like(
+                                model_forward_params['input_ids'], 
+                                -100  # Use -100 to mask padding in loss calculation
+                            )
+                            
+                            # Copy valid label values into the properly sized tensor
+                            # Place the labels at the end, aligned with generation
+                            copy_len = min(input_seq_len, label_seq_len)
+                            start_pos = max(0, input_seq_len - copy_len)
+                            new_labels[:, start_pos:input_seq_len] = labels['input_ids'][:, :copy_len]
+                            
+                            # Use the properly sized labels
+                            labels['input_ids'] = new_labels
                         
                         # Standard approach: pass labels directly
                         model_forward_params['labels'] = labels['input_ids']

@@ -5,7 +5,7 @@ import discord
 from discord.ext import commands
 from typing import Optional
 
-from sidekick.rl_pipeline import add_feedback, get_metrics
+from sidekick.rl_pipeline_ppo import add_feedback, get_metrics
 
 def setup_feedback_slash_commands(bot):
     """
