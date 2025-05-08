@@ -6,32 +6,53 @@ import time
 from discord.ext import commands, tasks
 from collections import defaultdict
 from sidekick.chat import load_model, generate_response
+from sidekick.rl_pipeline import (
+    add_feedback, 
+    process_feedback_queue, 
+    get_metrics, 
+    initialize_rl_pipeline
+)
+from sidekick.feedback_slash_commands import setup_feedback_slash_commands
+from sidekick.help_command import setup_help_command
 
 # Set up intents (required in Discord.py v2.0+)
 intents = discord.Intents.default()
 intents.message_content = True  # Necessary to read message content
 
-# Create bot instance with command prefix
+# Create bot instance with native Discord application commands
 class SidekickBot(commands.Bot):
+    def __init__(self):
+        # Initialize with empty command prefix and disable the default help command
+        super().__init__(
+            command_prefix=commands.when_mentioned, 
+            intents=intents,
+            help_command=None  # Disable the default help command
+        )
+    
     async def setup_hook(self):
         """A hook that is called when the bot is starting to sync commands and do setup"""
-        print("Setting up commands...")
-        # List existing commands (for debug purposes only)
-        for command in self.commands:
-            print(f"Command available: {command.name}")
-            
+        print("Setting up application commands...")
+        
+        # Setup slash commands before syncing
+        setup_feedback_slash_commands(self)
+        setup_help_command(self)
+        
         # Sync commands with Discord
         print("Syncing commands with Discord...")
         try:
-            # sync() will automatically register all slash commands
+            # sync() will register all slash commands globally
             await self.tree.sync()
-            print("Commands synced successfully!")
+            # Check if commands were registered
+            commands = await self.tree.fetch_commands()
+            print(f"Registered {len(commands)} application commands:")
+            for cmd in commands:
+                print(f"  /{cmd.name} - {cmd.description}")
+            print("Application commands synced successfully!")
         except Exception as e:
             print(f"Error syncing commands: {e}")
-            print("Commands will still be available as text commands with ! prefix")
 
 # Initialize the bot with our custom class
-bot = SidekickBot(command_prefix='!', intents=intents)
+bot = SidekickBot()
 
 # Dictionary to store conversation history for each channel
 # Format: {channel_id: [{"role": "...", "content": "..."}]}
@@ -103,13 +124,17 @@ async def on_ready():
     # Pre-load the model on startup
     await asyncio.to_thread(load_model)
     
+    # Initialize the RL pipeline
+    await initialize_rl_pipeline()
+    
     # Start the engagement decay task
     engagement_decay_task.start()
     
-    # Print registered commands
-    print("Registered commands:")
-    for command in bot.commands:
-        print(f"  !{command.name} - {command.help}")
+    # Start the RL feedback processing task
+    rl_feedback_task.start()
+    
+    # We don't need to print commands here anymore - they're printed in setup_hook
+    print("Bot is ready to use! Slash commands are available.")
 
 def get_conversation_history(channel_id, is_dm=False):
     """Get conversation history for a specific channel
@@ -244,6 +269,22 @@ async def engagement_decay_task():
 @engagement_decay_task.before_loop
 async def before_decay_task():
     """Wait for the bot to be ready before starting the engagement decay task"""
+    await bot.wait_until_ready()
+
+@tasks.loop(seconds=60)
+async def rl_feedback_task():
+    """Background task to process RL feedback queue"""
+    try:
+        # Process all pending feedback
+        processed = await process_feedback_queue()
+        if processed > 0:
+            print(f"Processed {processed} feedback items for RL training")
+    except Exception as e:
+        print(f"Error in RL feedback processing task: {e}")
+
+@rl_feedback_task.before_loop
+async def before_rl_feedback_task():
+    """Wait for the bot to be ready before starting the RL feedback task"""
     await bot.wait_until_ready()
 
 def log_prompt(history, level=LOG_LEVEL, channel_name="Unknown", author_name="Unknown"):
@@ -424,6 +465,13 @@ async def on_message(message):
             # Add bot response to conversation history
             add_to_conversation(message.channel.id, "assistant", response, is_dm=is_dm_channel)
             
+            # Add to RL feedback queue (automatically will be processed by task)
+            add_feedback(
+                conversation=history.copy(), 
+                response=response,
+                channel_id=str(message.channel.id)
+            )
+            
             # Split the response if it's too long for Discord
             message_chunks = split_long_message(response)
             
@@ -434,103 +482,113 @@ async def on_message(message):
     # NOTE: We're already processing commands at the beginning of this function
     # This was moved to ensure commands are processed before any AI response logic
 
-@bot.hybrid_command(
+# Convert to pure slash command
+@bot.tree.command(
     name='ping',
     description='Check if the bot is responsive'
 )
-async def ping(ctx):
+async def ping(interaction: discord.Interaction):
     """Simple command that responds with 'Pong!' to check if bot is responsive"""
     # Deliberately not using ephemeral=True here, as ping is often used to check if 
     # the bot is visible to everyone in the channel
-    await ctx.send('Pong!')
+    await interaction.response.send_message('Pong!')
 
-@bot.hybrid_command(
+@bot.tree.command(
     name='chat',
     description='Chat with the AI model'
 )
-async def chat(ctx, *, message: str = None):
+async def chat(interaction: discord.Interaction, message: str):
     """Chat with the AI model"""
-    if not message:
-        await ctx.send("Please provide a message to chat with the AI.")
-        return
-    
     # Check if this is a DM channel
-    is_dm_channel = isinstance(ctx.channel, discord.DMChannel)
+    is_dm_channel = isinstance(interaction.channel, discord.DMChannel)
     
     # Boost engagement level significantly - direct command is similar to a mention
-    boost_engagement(ctx.channel.id, RESPONSE_CONFIG["DIRECT_ENGAGEMENT_BOOST"])
+    boost_engagement(interaction.channel_id, RESPONSE_CONFIG["DIRECT_ENGAGEMENT_BOOST"])
     
-    # Send typing indicator
-    async with ctx.typing():
-        # Add user message to conversation
-        add_to_conversation(ctx.channel.id, "user", f"{ctx.author.display_name}: {message}", is_dm=is_dm_channel)
-        
-        # Get conversation history for this channel
-        history = get_conversation_history(ctx.channel.id, is_dm=is_dm_channel)
-        
-        # Log prompt to terminal if logging is enabled
-        channel_name = ctx.channel.name if hasattr(ctx.channel, 'name') else "DM"
-        log_prompt(history, channel_name=channel_name, author_name=ctx.author.display_name)
-        
-        # Get generation parameters for this channel
-        params = get_generation_params(ctx.channel.id)
-        
-        # Generate response using the model (run in thread pool to not block the event loop)
-        response = await asyncio.to_thread(
-            generate_response, 
-            history,
-            **params
-        )
-        
-        # Add bot response to conversation history
-        add_to_conversation(ctx.channel.id, "assistant", response, is_dm=is_dm_channel)
-        
-        # Split the response if it's too long for Discord
-        message_chunks = split_long_message(response)
-            
-        # Send each chunk as a separate message
-        for chunk in message_chunks:
-            await ctx.send(chunk)
+    # Defer the response since generation might take a while
+    await interaction.response.defer(thinking=True)
+    
+    # Add user message to conversation
+    add_to_conversation(
+        interaction.channel_id, 
+        "user", 
+        f"{interaction.user.display_name}: {message}", 
+        is_dm=is_dm_channel
+    )
+    
+    # Get conversation history for this channel
+    history = get_conversation_history(interaction.channel_id, is_dm=is_dm_channel)
+    
+    # Log prompt to terminal if logging is enabled
+    channel_name = interaction.channel.name if hasattr(interaction.channel, 'name') else "DM"
+    log_prompt(history, channel_name=channel_name, author_name=interaction.user.display_name)
+    
+    # Get generation parameters for this channel
+    params = get_generation_params(interaction.channel_id)
+    
+    # Generate response using the model (run in thread pool to not block the event loop)
+    response = await asyncio.to_thread(
+        generate_response, 
+        history,
+        **params
+    )
+    
+    # Add bot response to conversation history
+    add_to_conversation(interaction.channel_id, "assistant", response, is_dm=is_dm_channel)
+    
+    # Add to RL feedback queue (automatically will be processed by task)
+    add_feedback(
+        conversation=history.copy(), 
+        response=response,
+        channel_id=str(interaction.channel_id)
+    )
+    
+    # Split the response if it's too long for Discord
+    message_chunks = split_long_message(response)
+    
+    # Send the first chunk as the response to the interaction
+    await interaction.followup.send(message_chunks[0])
+    
+    # Send any additional chunks as follow-up messages
+    if len(message_chunks) > 1:
+        for chunk in message_chunks[1:]:
+            await interaction.channel.send(chunk)
 
-@bot.hybrid_command(
+@bot.tree.command(
     name='clear',
     description='Clear the conversation history for the current channel'
 )
-async def clear_history(ctx):
+async def clear_history(interaction: discord.Interaction):
     """Clear the conversation history for the current channel"""
-    if ctx.channel.id in conversation_histories:
+    if interaction.channel_id in conversation_histories:
         # Reset history but keep the system prompt
         system_prompt = DEFAULT_SYSTEM_PROMPT
-        for msg in conversation_histories[ctx.channel.id]:
+        for msg in conversation_histories[interaction.channel_id]:
             if msg["role"] == "system":
                 system_prompt = msg["content"]
                 break
         
-        conversation_histories[ctx.channel.id] = [{"role": "system", "content": system_prompt}]
+        conversation_histories[interaction.channel_id] = [{"role": "system", "content": system_prompt}]
         
         # Reset engagement for this channel (clearing history suggests ending the conversation)
-        if ctx.channel.id in conversation_engagement:
-            conversation_engagement.pop(ctx.channel.id)
+        if interaction.channel_id in conversation_engagement:
+            conversation_engagement.pop(interaction.channel_id)
         
         # Send ephemeral confirmation message
-        await ctx.send("Conversation history cleared!", ephemeral=True)
+        await interaction.response.send_message("Conversation history cleared!", ephemeral=True)
     else:
-        await ctx.send("No conversation history to clear.", ephemeral=True)
+        await interaction.response.send_message("No conversation history to clear.", ephemeral=True)
 
-@bot.hybrid_command(
+@bot.tree.command(
     name='system',
     description='Set a custom system prompt for the AI in the current channel'
 )
-async def set_system_prompt(ctx, *, prompt: str = None):
-    """Set a custom system prompt for the AI in the current channel"""
-    if not prompt:
-        await ctx.send("Please provide a system prompt.", ephemeral=True)
-        return
-    
+async def set_system_prompt(interaction: discord.Interaction, prompt: str):
+    """Set a custom system prompt for the AI in the current channel"""    
     # Boost engagement slightly - modifying system prompt shows interest
-    boost_engagement(ctx.channel.id, 0.3)
+    boost_engagement(interaction.channel_id, 0.3)
     
-    history = get_conversation_history(ctx.channel.id)
+    history = get_conversation_history(interaction.channel_id)
     
     # Find and update system message if it exists
     system_updated = False
@@ -545,51 +603,70 @@ async def set_system_prompt(ctx, *, prompt: str = None):
         history.insert(0, {"role": "system", "content": prompt})
     
     # Send ephemeral confirmation message
-    await ctx.send(f"System prompt updated to: '{prompt}'", ephemeral=True)
+    await interaction.response.send_message(f"System prompt updated to: '{prompt}'", ephemeral=True)
 
-@bot.hybrid_command(
+@bot.tree.command(
     name='config',
-    description='Configure text generation parameters for this channel'
+    description='View current generation parameters for this channel'
 )
-async def config_generation(ctx, param=None, value=None):
-    """Configure generation parameters for this channel"""
-    channel_id = ctx.channel.id
+async def config_view(interaction: discord.Interaction):
+    """View current generation parameters for this channel"""
+    channel_id = interaction.channel_id
     
     # Get the current parameters for this channel
     params = get_generation_params(channel_id)
     
-    # If no param specified, show current config
-    if param is None:
-        param_list = '\n'.join([f"- **{k}**: `{v}`" for k, v in params.items()])
-        await ctx.send(
-            f"Current generation parameters for this channel:\n{param_list}\n\n"
-            f"Use `!config <parameter> <value>` to change a parameter.",
-            ephemeral=True
-        )
-        return
+    # Format params for display
+    param_list = '\n'.join([f"- **{k}**: `{v}`" for k, v in params.items()])
     
-    # If param is 'reset', reset to defaults
-    if param.lower() == 'reset':
-        generation_params[channel_id] = DEFAULT_GENERATION_PARAMS.copy()
-        await ctx.send("Generation parameters reset to defaults.", ephemeral=True)
-        return
+    await interaction.response.send_message(
+        f"Current generation parameters for this channel:\n{param_list}\n\n"
+        f"Use `/config_set` or `/config_reset` to modify parameters.",
+        ephemeral=True
+    )
+
+@bot.tree.command(
+    name='config_reset',
+    description='Reset generation parameters to default values'
+)
+async def config_reset(interaction: discord.Interaction):
+    """Reset generation parameters to default values"""
+    channel_id = interaction.channel_id
+    
+    # Reset to defaults
+    generation_params[channel_id] = DEFAULT_GENERATION_PARAMS.copy()
+    
+    await interaction.response.send_message(
+        "Generation parameters reset to defaults.",
+        ephemeral=True
+    )
+
+@bot.tree.command(
+    name='config_set',
+    description='Set a specific generation parameter'
+)
+async def config_set(
+    interaction: discord.Interaction, 
+    parameter: str,
+    value: str
+):
+    """Set a specific generation parameter"""
+    channel_id = interaction.channel_id
+    
+    # Get the current parameters for this channel
+    params = get_generation_params(channel_id)
     
     # Check if the parameter exists
-    if param not in DEFAULT_GENERATION_PARAMS:
+    if parameter not in DEFAULT_GENERATION_PARAMS:
         valid_params = '`, `'.join(DEFAULT_GENERATION_PARAMS.keys())
-        await ctx.send(
-            f"Unknown parameter: `{param}`\nValid parameters: `{valid_params}`", 
+        await interaction.response.send_message(
+            f"Unknown parameter: `{parameter}`\nValid parameters: `{valid_params}`", 
             ephemeral=True
         )
-        return
-    
-    # If no value specified, show current value
-    if value is None:
-        await ctx.send(f"Current value of `{param}`: `{params[param]}`", ephemeral=True)
         return
     
     # Try to convert value to the appropriate type
-    current_value = params[param]
+    current_value = params[parameter]
     try:
         if isinstance(current_value, bool):
             if value.lower() in ('true', 'yes', '1', 'on'):
@@ -605,74 +682,87 @@ async def config_generation(ctx, param=None, value=None):
         else:
             new_value = value
     except ValueError as e:
-        await ctx.send(f"Invalid value for `{param}`: {str(e)}", ephemeral=True)
-        return
-    
-    # Update the parameter
-    params[param] = new_value
-    generation_params[channel_id] = params
-    
-    await ctx.send(f"Updated `{param}` to `{new_value}`", ephemeral=True)
-
-@bot.hybrid_command(
-    name='logging',
-    description='Toggle prompt logging to terminal (owner only)'
-)
-@commands.is_owner()  # Restrict this command to the bot owner
-async def toggle_logging(ctx, setting=None, level=None):
-    """Toggle prompt logging to terminal (owner only)"""
-    global ENABLE_LOGGING, LOG_LEVEL
-    
-    # If no setting provided, show current status
-    if setting is None:
-        await ctx.send(
-            f"Logging is currently **{'enabled' if ENABLE_LOGGING else 'disabled'}**\n"
-            f"Log level: **{LOG_LEVEL}**\n\n"
-            f"Use `!logging on/off` to toggle logging\n"
-            f"Use `!logging level 0/1/2` to set log level",
-            ephemeral=True  # Make response visible only to the command invoker
+        await interaction.response.send_message(
+            f"Invalid value for `{parameter}`: {str(e)}", 
+            ephemeral=True
         )
         return
     
-    # Handle setting the log level
-    if setting.lower() == 'level':
-        if level is None:
-            await ctx.send(
-                f"Current log level: **{LOG_LEVEL}**\n"
-                f"0 = minimal, 1 = basic, 2 = detailed",
-                ephemeral=True
-            )
-            return
-        
-        try:
-            level_int = int(level)
-            if 0 <= level_int <= 2:
-                LOG_LEVEL = level_int
-                await ctx.send(f"Log level set to **{LOG_LEVEL}**", ephemeral=True)
-            else:
-                await ctx.send("Log level must be 0, 1, or 2", ephemeral=True)
-        except ValueError:
-            await ctx.send("Log level must be a number (0, 1, or 2)", ephemeral=True)
-        return
+    # Update the parameter
+    params[parameter] = new_value
+    generation_params[channel_id] = params
     
-    # Handle toggling logging on/off
-    if setting.lower() in ['on', 'true', 'enable', 'yes', '1']:
-        ENABLE_LOGGING = True
-        await ctx.send("Prompt logging **enabled**", ephemeral=True)
-    elif setting.lower() in ['off', 'false', 'disable', 'no', '0']:
-        ENABLE_LOGGING = False
-        await ctx.send("Prompt logging **disabled**", ephemeral=True)
-    else:
-        await ctx.send("Invalid setting. Use `on` or `off`", ephemeral=True)
+    await interaction.response.send_message(
+        f"Updated `{parameter}` to `{new_value}`", 
+        ephemeral=True
+    )
 
-@bot.hybrid_command(
+@bot.tree.command(
+    name='logging',
+    description='View current logging status (owner only)'
+)
+@commands.is_owner()  # Restrict this command to the bot owner
+async def logging_status(interaction: discord.Interaction):
+    """View current logging status (owner only)"""
+    global ENABLE_LOGGING, LOG_LEVEL
+    
+    await interaction.response.send_message(
+        f"Logging is currently **{'enabled' if ENABLE_LOGGING else 'disabled'}**\n"
+        f"Log level: **{LOG_LEVEL}**\n\n"
+        f"Use `/logging_toggle` to enable/disable logging\n"
+        f"Use `/logging_level` to set log level",
+        ephemeral=True  # Make response visible only to the command invoker
+    )
+
+@bot.tree.command(
+    name='logging_toggle',
+    description='Toggle prompt logging on/off (owner only)'
+)
+@commands.is_owner()  # Restrict this command to the bot owner
+async def logging_toggle(interaction: discord.Interaction, enable: bool):
+    """Toggle prompt logging on/off (owner only)"""
+    global ENABLE_LOGGING
+    
+    ENABLE_LOGGING = enable
+    
+    await interaction.response.send_message(
+        f"Prompt logging **{'enabled' if ENABLE_LOGGING else 'disabled'}**",
+        ephemeral=True
+    )
+
+@bot.tree.command(
+    name='logging_level',
+    description='Set logging detail level (owner only)'
+)
+@commands.is_owner()  # Restrict this command to the bot owner
+async def logging_level(
+    interaction: discord.Interaction, 
+    level: int
+):
+    """Set logging detail level (owner only)"""
+    global LOG_LEVEL
+    
+    if 0 <= level <= 2:
+        LOG_LEVEL = level
+        await interaction.response.send_message(
+            f"Log level set to **{LOG_LEVEL}**\n"
+            f"0 = minimal, 1 = basic, 2 = detailed",
+            ephemeral=True
+        )
+    else:
+        await interaction.response.send_message(
+            "Log level must be 0, 1, or 2", 
+            ephemeral=True
+        )
+
+@bot.tree.command(
     name='engagement',
     description='Check the current engagement level for this channel (owner only)'
 )
 @commands.is_owner()  # Restrict this command to the bot owner
-async def check_engagement(ctx):
+async def check_engagement(interaction: discord.Interaction):
     """Check the current engagement level for this channel (debug command)"""
-    channel_id = ctx.channel.id
+    channel_id = interaction.channel_id
     
     # Get current engagement
     engagement_level = get_engagement_level(channel_id)
@@ -686,7 +776,7 @@ async def check_engagement(ctx):
     engagement_percent = engagement_level * 100
     response_percent = response_chance * 100
     
-    await ctx.send(
+    await interaction.response.send_message(
         f"Debug info for this channel:\n"
         f"- Engagement level: {engagement_percent:.2f}%\n"
         f"- Current response chance: {response_percent:.2f}%\n"
@@ -694,6 +784,21 @@ async def check_engagement(ctx):
         f"- Max response chance: {RESPONSE_CONFIG['MAX_CHANCE']}%",
         ephemeral=True  # Make response visible only to the command invoker
     )
+
+# Remove hybrid commands that have been converted to slash commands
+@bot.event
+async def on_command_error(ctx, error):
+    """
+    This event is triggered when a command raises an error.
+    We'll use it to handle command not found errors gracefully.
+    """
+    if isinstance(error, commands.CommandNotFound):
+        # Silently ignore command not found errors (legacy prefix commands)
+        # We're using slash commands now
+        pass
+    else:
+        # Print other errors for debugging
+        print(f"Command error: {error}")
 
 # Run the bot
 if __name__ == '__main__':
