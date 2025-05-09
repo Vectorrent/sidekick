@@ -27,9 +27,6 @@ def setup_help_command(bot):
         embed.add_field(
             name="Basic Commands",
             value=(
-                "• `/ping` - Check if the bot is responsive\n"
-                "• `/chat <message>` - Chat with the AI model\n"
-                "• `/clear` - Clear conversation history\n"
                 "• `/system <prompt>` - Set custom system prompt\n"
             ),
             inline=False
@@ -40,16 +37,6 @@ def setup_help_command(bot):
             value=(
                 "• `/good_bot [comment]` - Rate the last response positively\n"
                 "• `/bad_bot [comment]` - Rate the last response negatively\n"
-            ),
-            inline=False
-        )
-        
-        embed.add_field(
-            name="Configuration Commands",
-            value=(
-                "• `/config` - View generation parameters\n"
-                "• `/config_set <param> <value>` - Set a parameter\n"
-                "• `/config_reset` - Reset to default parameters\n"
             ),
             inline=False
         )

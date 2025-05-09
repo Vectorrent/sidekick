@@ -1,84 +1,66 @@
 # Sidekick
 
-A Discord bot with SmolLM2-135M-Instruct integration and reinforcement learning capabilities.
+A Discord bot powered by SmolLM2-135M-Instruct with reinforcement learning capabilities.
 
-## Overview
+## Features
 
-Sidekick is a small experimental project that integrates a Discord bot with a local LLM (SmolLM2-135M-Instruct). The project consists of:
+- **Discord Bot Integration**: Responds to commands and messages with AI-generated text
+- **Local LLM**: Uses SmolLM2-135M-Instruct model for text generation
+- **Reinforcement Learning**: Improves responses over time using user feedback
+- **Standalone Chat Interface**: Interact with the model without Discord
 
-1. A Discord bot implementation that responds to messages and commands
-2. A standalone chat interface for interacting with the SmolLM2 model
-3. An integrated system that allows the Discord bot to use the LLM for conversations
-4. Reinforcement learning with LoRA/PEFT for continuous model improvement
+## Quick Start
 
-## Environment Setup
+### Requirements
 
-The project requires the following dependencies:
-- python-dotenv (for managing environment variables)
-- discord.py (for Discord bot functionality)
-- torch (for machine learning)
-- transformers (for HuggingFace model integration)
-- peft (for Parameter-Efficient Fine-Tuning)
-- trl (for reinforcement learning)
+- Python 3.8+
+- Discord Bot Token (set in `.env` file)
 
-## Environment Variables
+### Installation
 
-The Discord bot requires a `DISCORD_TOKEN` environment variable to be set in a `.env` file at the root of the project.
-
-Example `.env` file:
-```
-DISCORD_TOKEN=your_token_here
-```
-
-## Running the Application
-
-To run the Discord bot with LLM integration:
 ```bash
-python main.py
+# Clone this repository
+git clone https://github.com/yourusername/sidekick.git
+cd sidekick
+
+# Install dependencies
+pip install -e .
 ```
 
-To run the standalone chat interface (without Discord):
-```bash
-python -m sidekick.chat
-```
+### Usage
 
-## Discord Bot Features
+1. Create a `.env` file with your Discord token:
+   ```
+   DISCORD_TOKEN=your_token_here
+   ```
 
-- Command prefix: `!`
-- Built-in commands:
-  - `!ping`: Responds with "Pong!" to check if the bot is responsive
-  - `!chat <message>`: Chat with the AI model
-  - `!clear`: Clear conversation history for the current channel
-  - `!system <prompt>`: Set a custom system prompt for the AI in the current channel
-  - `!config`: View and modify text generation parameters
-  - `!feedback <rating> <comment>`: Provide feedback on the last AI response
-  - `!rl_metrics`: [Owner only] View reinforcement learning metrics
-  - `!engagement`: [Owner only] Debug command to check current engagement level
-- Automatic responses:
-  - Responds to @mentions with AI-generated responses
-  - Random chance to respond to any message, even without being mentioned
-  - Increased response chance for channels where the bot is already engaged in conversation
+2. Run the Discord bot:
+   ```bash
+   python main.py
+   ```
 
-## Reinforcement Learning Integration
+3. Or use the standalone chat interface:
+   ```bash
+   python -m sidekick.chat
+   ```
 
-The bot includes PPO-based reinforcement learning with LoRA parameter-efficient fine-tuning:
+## Discord Commands
 
-- Uses TRL library for Proximal Policy Optimization (PPO)
-- Uses PEFT library for LoRA adapters (parameter-efficient training)
-- Supports online single-step RL training from user feedback
-- Feedback can be provided through:
-  - Direct ratings via the `/good_bot` and `/bad_bot` commands
-  - Optional comment sentiment analysis
-- Uses the base model (adapter disabled) as reference for KL divergence penalty
-- Training metrics can be viewed with the `/rl_metrics` command
-- LoRA adapters are automatically saved after every 10 training steps
+| Command | Description |
+|---------|-------------|
+| `/system <prompt>` | Set custom system prompt |
+| `/good_bot [comment]` | Rate last response positively |
+| `/bad_bot [comment]` | Rate last response negatively |
 
-## Conversation Engagement System
+## Core Components
 
-The bot includes a natural conversation engagement system:
+- **Engagement System**: Bot becomes more likely to respond in active channels
+- **Reinforcement Learning**: Uses PPO and LoRA for continuous improvement
+- **Text Generation Config**: Customizable per-channel generation parameters
 
-- Has a small random chance to respond to any message
-- After responding or being engaged, becomes more likely to respond to subsequent messages in the same channel
-- Engagement level affects response probability
-- Engagement level naturally decays over time
-- Each channel has its own independent engagement tracking
+## Technical Details
+
+- Uses Hugging Face Transformers for model loading and inference
+- Parameter-Efficient Fine-Tuning (PEFT) with LoRA adapters
+- Proximal Policy Optimization (PPO) via TRL library
+- Automatic GPU detection and utilization

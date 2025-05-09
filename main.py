@@ -25,13 +25,7 @@ async def run_bot():
     
     print("Starting bot...")
     print("Available commands:")
-    print("  /ping - Check if the bot is responsive")
-    print("  /chat <message> - Chat with the AI")
-    print("  /clear - Clear conversation history")
     print("  /system <prompt> - Set a custom system prompt")
-    print("  /config - View current generation parameters")
-    print("  /config_set <parameter> <value> - Set a parameter value")
-    print("  /config_reset - Reset parameters to default values")
     print("  /good_bot [comment] - Give positive feedback on the last response")
     print("  /bad_bot [comment] - Give negative feedback on the last response")
     print("  /engagement - [Owner only] Check engagement level for debugging")
