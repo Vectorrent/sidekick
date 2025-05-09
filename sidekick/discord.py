@@ -90,8 +90,7 @@ DISCORD_MESSAGE_LIMIT = 1900
 MAX_HISTORY_LENGTH = 10
 
 # Logging settings
-ENABLE_LOGGING = False  # Enable prompt logging by default for debugging
-LOG_LEVEL = 1  # 0 = minimal, 1 = basic, 2 = detailed
+ENABLE_LOGGING = False  # Toggle for prompt logging (on/off)
 
 # System prompts for the AI
 DEFAULT_SYSTEM_PROMPT = "You are named Maya Chen, and you are an AI researcher. You are polite, knowledgeable, and concise."
@@ -287,13 +286,12 @@ async def before_rl_feedback_task():
     """Wait for the bot to be ready before starting the RL feedback task"""
     await bot.wait_until_ready()
 
-def log_prompt(history, level=LOG_LEVEL, channel_name="Unknown", author_name="Unknown"):
+def log_prompt(history, channel_name="Unknown", author_name="Unknown"):
     """
     Log conversation history to the terminal
     
     Args:
         history (list): List of message dicts with 'role' and 'content' keys
-        level (int): Log level (0=minimal, 1=basic, 2=detailed)
         channel_name (str): Name of the Discord channel
         author_name (str): Name of the message author
     """
@@ -301,47 +299,33 @@ def log_prompt(history, level=LOG_LEVEL, channel_name="Unknown", author_name="Un
         return
     
     print("\n" + "="*50)
-    print(f"PROMPT LOG - Channel: {channel_name} - Author: {author_name}")
+    print(f"CONVERSATION LOG - Channel: {channel_name} - Author: {author_name}")
     print("="*50)
     
-    if level == 0:
-        # Minimal logging - just show the latest user message and system prompt
-        system_prompt = None
-        latest_user_message = None
-        
-        for msg in history:
-            if msg["role"] == "system":
-                system_prompt = msg["content"]
-            if msg["role"] == "user":
-                latest_user_message = msg["content"]
-        
-        if system_prompt:
-            print(f"SYSTEM: {system_prompt}")
-        if latest_user_message:
-            print(f"USER: {latest_user_message}")
+    # Find the latest assistant response (will be at the end if present)
+    latest_assistant_msg = None
+    for msg in reversed(history):
+        if msg["role"] == "assistant":
+            latest_assistant_msg = msg
+            break
     
-    elif level == 1:
-        # Basic logging - show all messages
-        for i, msg in enumerate(history):
-            role = msg["role"].upper()
-            content = msg["content"]
-            # Truncate very long messages
-            if len(content) > 500:
-                content = content[:500] + "... [truncated]"
-            print(f"{i}. {role}: {content}")
-    
-    elif level == 2:
-        # Detailed logging - show all messages and full history
-        print("FULL CONVERSATION HISTORY:")
-        for i, msg in enumerate(history):
-            role = msg["role"].upper()
-            content = msg["content"]
-            print(f"{i}. {role}: {content}")
+    # First show all messages
+    for i, msg in enumerate(history):
+        role = msg["role"].upper()
+        content = msg["content"]
+        # Truncate very long messages
+        if len(content) > 500:
+            content = content[:500] + "... [truncated]"
         
-        # Also print raw history for debugging
-        print("\nRAW HISTORY:")
-        import json
-        print(json.dumps(history, indent=2))
+        # Add emphasis to the latest assistant response
+        if msg is latest_assistant_msg:
+            print(f"{i}. {role}: {content}")
+            print("-"*50)
+            print("LAST ASSISTANT RESPONSE:")
+            print(f"{content}")
+            print("-"*50)
+        else:
+            print(f"{i}. {role}: {content}")
     
     print("="*50 + "\n")
 
@@ -448,10 +432,6 @@ async def on_message(message):
             # Get conversation history for this channel
             history = get_conversation_history(message.channel.id, is_dm=is_dm_channel)
             
-            # Log prompt to terminal if logging is enabled
-            channel_name = message.channel.name if hasattr(message.channel, 'name') else "DM"
-            log_prompt(history, channel_name=channel_name, author_name=message.author.display_name)
-            
             # Get generation parameters for this channel
             params = get_generation_params(message.channel.id)
             
@@ -465,10 +445,17 @@ async def on_message(message):
             # Add bot response to conversation history
             add_to_conversation(message.channel.id, "assistant", response, is_dm=is_dm_channel)
             
+            # Get updated conversation history with the assistant's response
+            updated_history = get_conversation_history(message.channel.id, is_dm=is_dm_channel)
+            
+            # Log the complete conversation including the assistant's response
+            channel_name = message.channel.name if hasattr(message.channel, 'name') else "DM"
+            log_prompt(updated_history, channel_name=channel_name, author_name=message.author.display_name)
+            
             # Add to RL feedback queue (automatically will be processed by task)
             # Pass an empty string as user_feedback to ensure it uses the automatic rewarder
             add_feedback(
-                conversation=history.copy(), 
+                conversation=updated_history.copy(), 
                 response=response,
                 user_feedback="",  # Empty string so compute_reward knows to use automatic rewards
                 channel_id=str(message.channel.id)
@@ -509,61 +496,21 @@ async def set_system_prompt(interaction: discord.Interaction, prompt: str):
 
 @bot.tree.command(
     name='logging',
-    description='View current logging status (owner only)'
-)
-@commands.is_owner()  # Restrict this command to the bot owner
-async def logging_status(interaction: discord.Interaction):
-    """View current logging status (owner only)"""
-    global ENABLE_LOGGING, LOG_LEVEL
-    
-    await interaction.response.send_message(
-        f"Logging is currently **{'enabled' if ENABLE_LOGGING else 'disabled'}**\n"
-        f"Log level: **{LOG_LEVEL}**\n\n"
-        f"Use `/logging_toggle` to enable/disable logging\n"
-        f"Use `/logging_level` to set log level",
-        ephemeral=True  # Make response visible only to the command invoker
-    )
-
-@bot.tree.command(
-    name='logging_toggle',
     description='Toggle prompt logging on/off (owner only)'
 )
 @commands.is_owner()  # Restrict this command to the bot owner
-async def logging_toggle(interaction: discord.Interaction, enable: bool):
+async def logging_command(interaction: discord.Interaction):
     """Toggle prompt logging on/off (owner only)"""
     global ENABLE_LOGGING
     
-    ENABLE_LOGGING = enable
+    # Toggle the current logging state
+    ENABLE_LOGGING = not ENABLE_LOGGING
     
+    # Inform the user of the new state
     await interaction.response.send_message(
         f"Prompt logging **{'enabled' if ENABLE_LOGGING else 'disabled'}**",
         ephemeral=True
     )
-
-@bot.tree.command(
-    name='logging_level',
-    description='Set logging detail level (owner only)'
-)
-@commands.is_owner()  # Restrict this command to the bot owner
-async def logging_level(
-    interaction: discord.Interaction, 
-    level: int
-):
-    """Set logging detail level (owner only)"""
-    global LOG_LEVEL
-    
-    if 0 <= level <= 2:
-        LOG_LEVEL = level
-        await interaction.response.send_message(
-            f"Log level set to **{LOG_LEVEL}**\n"
-            f"0 = minimal, 1 = basic, 2 = detailed",
-            ephemeral=True
-        )
-    else:
-        await interaction.response.send_message(
-            "Log level must be 0, 1, or 2", 
-            ephemeral=True
-        )
 
 @bot.tree.command(
     name='engagement',

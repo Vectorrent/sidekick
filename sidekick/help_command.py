@@ -45,9 +45,7 @@ def setup_help_command(bot):
             name="Owner Commands",
             value=(
                 "• `/engagement` - Check channel engagement level\n"
-                "• `/logging` - View logging status\n"
-                "• `/logging_toggle <enable>` - Enable/disable logging\n"
-                "• `/logging_level <level>` - Set logging detail level\n"
+                "• `/logging` - Toggle prompt logging on/off\n"
                 "• `/rl_metrics` - View reinforcement learning metrics\n"
             ),
             inline=False
