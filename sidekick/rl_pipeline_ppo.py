@@ -43,13 +43,11 @@ class FeedbackRecord:
         self,
         conversation: List[Dict[str, str]],
         response: str,
-        user_feedback: Optional[str] = None,
         binary_rating: Optional[int] = None,
         channel_id: Optional[str] = None
     ):
         self.conversation = conversation
         self.response = response
-        self.user_feedback = user_feedback
         self.binary_rating = binary_rating
         self.channel_id = channel_id
         self.timestamp = time.time()
@@ -60,7 +58,6 @@ class FeedbackRecord:
         return {
             "conversation": self.conversation,
             "response": self.response,
-            "user_feedback": self.user_feedback,
             "binary_rating": self.binary_rating,
             "channel_id": self.channel_id,
             "timestamp": self.timestamp,
@@ -73,7 +70,6 @@ class FeedbackRecord:
         record = cls(
             conversation=data["conversation"],
             response=data["response"],
-            user_feedback=data.get("user_feedback"),
             binary_rating=data.get("binary_rating"),
             channel_id=data.get("channel_id")
         )
@@ -81,13 +77,12 @@ class FeedbackRecord:
         record.processed = data.get("processed", False)
         return record
 
-def compute_reward(response: str, user_feedback: Optional[str] = None, binary_rating: Optional[int] = None) -> float:
+def compute_reward(response: str, binary_rating: Optional[int] = None) -> float:
     """
     Compute reward for RL training
     
     Args:
         response (str): The model's response to rate
-        user_feedback (str, optional): Optional feedback text from user
         binary_rating (int, optional): Optional binary rating (1 for positive, 0 for negative)
         
     Returns:
@@ -96,24 +91,6 @@ def compute_reward(response: str, user_feedback: Optional[str] = None, binary_ra
     # Simple implementation: use explicit binary rating if provided
     if binary_rating is not None:
         return 1.0 if binary_rating > 0 else -1.0
-    
-    # If user feedback available, use simple heuristics 
-    if user_feedback:
-        # Extremely simple sentiment analysis - just a placeholder
-        positive_words = ["good", "great", "excellent", "helpful", "thanks", "thank", "nice", "perfect"]
-        negative_words = ["bad", "wrong", "incorrect", "not helpful", "terrible", "useless"]
-        
-        feedback_lower = user_feedback.lower()
-        
-        # Count positive and negative indicators
-        positive_count = sum(1 for word in positive_words if word in feedback_lower)
-        negative_count = sum(1 for word in negative_words if word in feedback_lower)
-        
-        # Compute a simple score
-        total = positive_count + negative_count
-        if total == 0:
-            return 0.0
-        return (positive_count - negative_count) / total
     
     # ======= Automatic reward heuristics =======
     # When no explicit feedback is provided, we can use these heuristics
@@ -348,7 +325,6 @@ async def load_model_for_ppo(model_name="HuggingFaceTB/SmolLM2-135M-Instruct", a
 def add_feedback(
     conversation: List[Dict[str, str]],
     response: str,
-    user_feedback: Optional[str] = None,
     binary_rating: Optional[int] = None,
     channel_id: Optional[str] = None
 ) -> bool:
@@ -358,7 +334,6 @@ def add_feedback(
     Args:
         conversation: The conversation history (list of role/content dictionaries)
         response: The model's response that's being rated
-        user_feedback: Optional textual feedback
         binary_rating: Optional explicit rating (1 for positive, 0 for negative)
         channel_id: Optional Discord channel ID for tracking
     
@@ -369,13 +344,12 @@ def add_feedback(
     
     try:
         # Log feedback details
-        print(f"Adding feedback to queue: binary_rating={binary_rating}, user_feedback='{user_feedback}'")
+        print(f"Adding feedback to queue: binary_rating={binary_rating}")
         
         # Create feedback record
         record = FeedbackRecord(
             conversation=conversation,
             response=response,
-            user_feedback=user_feedback,
             binary_rating=binary_rating,
             channel_id=channel_id
         )
@@ -412,10 +386,9 @@ async def process_single_feedback(record: FeedbackRecord) -> Dict[str, Any]:
     
     try:
         # Compute reward with explicit debug logging
-        print(f"Processing feedback with binary_rating={record.binary_rating}, user_feedback='{record.user_feedback}'")
+        print(f"Processing feedback with binary_rating={record.binary_rating}")
         reward = compute_reward(
             response=record.response,
-            user_feedback=record.user_feedback,
             binary_rating=record.binary_rating
         )
         print(f"Computed reward: {reward}")

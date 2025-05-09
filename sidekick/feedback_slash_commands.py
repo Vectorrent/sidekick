@@ -18,12 +18,9 @@ def setup_feedback_slash_commands(bot):
         name='good_bot',
         description='Give positive feedback to the bot\'s last response'
     )
-    async def good_bot(interaction: discord.Interaction, comment: Optional[str] = None):
+    async def good_bot(interaction: discord.Interaction):
         """
         Provide positive feedback on the bot's most recent response
-        
-        Args:
-            comment: Optional feedback comment
         """
         channel_id = interaction.channel_id
         
@@ -62,17 +59,12 @@ def setup_feedback_slash_commands(bot):
         success = add_feedback(
             conversation=previous_convo,
             response=assistant_response,
-            user_feedback=comment,
             binary_rating=1,  # Positive rating
             channel_id=str(channel_id)
         )
         
         if success:
-            if comment:
-                confirmation_msg = f"Thanks for the positive feedback! Comment: '{comment}'"
-            else:
-                confirmation_msg = "Thanks for the positive feedback!"
-                
+            confirmation_msg = "Thanks for the positive feedback!"
             await interaction.response.send_message(
                 confirmation_msg, 
                 ephemeral=True
@@ -87,12 +79,9 @@ def setup_feedback_slash_commands(bot):
         name='bad_bot',
         description='Give negative feedback to the bot\'s last response'
     )
-    async def bad_bot(interaction: discord.Interaction, comment: Optional[str] = None):
+    async def bad_bot(interaction: discord.Interaction):
         """
         Provide negative feedback on the bot's most recent response
-        
-        Args:
-            comment: Optional feedback comment
         """
         channel_id = interaction.channel_id
         
@@ -131,17 +120,12 @@ def setup_feedback_slash_commands(bot):
         success = add_feedback(
             conversation=previous_convo,
             response=assistant_response,
-            user_feedback=comment,
             binary_rating=0,  # Negative rating
             channel_id=str(channel_id)
         )
         
         if success:
-            if comment:
-                confirmation_msg = f"Thanks for the feedback. I'll try to do better. Comment: '{comment}'"
-            else:
-                confirmation_msg = "Thanks for the feedback. I'll try to do better."
-                
+            confirmation_msg = "Thanks for the feedback. I'll try to do better."
             await interaction.response.send_message(
                 confirmation_msg, 
                 ephemeral=True

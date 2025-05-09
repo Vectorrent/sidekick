@@ -453,11 +453,9 @@ async def on_message(message):
             log_prompt(updated_history, channel_name=channel_name, author_name=message.author.display_name)
             
             # Add to RL feedback queue (automatically will be processed by task)
-            # Pass an empty string as user_feedback to ensure it uses the automatic rewarder
             add_feedback(
                 conversation=updated_history.copy(), 
                 response=response,
-                user_feedback="",  # Empty string so compute_reward knows to use automatic rewards
                 channel_id=str(message.channel.id)
             )
             

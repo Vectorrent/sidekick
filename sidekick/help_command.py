@@ -35,8 +35,8 @@ def setup_help_command(bot):
         embed.add_field(
             name="Feedback Commands",
             value=(
-                "• `/good_bot [comment]` - Rate the last response positively\n"
-                "• `/bad_bot [comment]` - Rate the last response negatively\n"
+                "• `/good_bot` - Rate the last response positively\n"
+                "• `/bad_bot` - Rate the last response negatively\n"
             ),
             inline=False
         )
