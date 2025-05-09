@@ -30,7 +30,7 @@ async def run_bot():
     print("  /bad_bot [comment] - Give negative feedback on the last response")
     print("  /engagement - [Owner only] Check engagement level for debugging")
     print("  /logging - [Owner only] Toggle prompt logging on/off")
-    print("  /rl_metrics - [Owner only] View reinforcement learning metrics")
+    print("  /metrics - [Owner only] View reinforcement learning metrics")
     print()
     print("Conversation Engagement Features:")
     print("  - The bot has a small random chance to respond to any message")

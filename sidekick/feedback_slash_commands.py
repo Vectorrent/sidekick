@@ -153,11 +153,11 @@ def setup_feedback_slash_commands(bot):
             )
 
     @bot.tree.command(
-        name='rl_metrics',
+        name='metrics',
         description='View current RL training metrics (owner only)'
     )
     @commands.is_owner()  # Restrict to bot owner
-    async def show_rl_metrics(interaction: discord.Interaction):
+    async def show_metrics(interaction: discord.Interaction):
         """Show current reinforcement learning metrics (owner only)"""
         metrics = get_metrics()
         
@@ -229,4 +229,4 @@ def setup_feedback_slash_commands(bot):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     # Return the commands
-    return good_bot, bad_bot, show_rl_metrics
+    return good_bot, bad_bot, show_metrics

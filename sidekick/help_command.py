@@ -46,7 +46,7 @@ def setup_help_command(bot):
             value=(
                 "• `/engagement` - Check channel engagement level\n"
                 "• `/logging` - Toggle prompt logging on/off\n"
-                "• `/rl_metrics` - View reinforcement learning metrics\n"
+                "• `/metrics` - View reinforcement learning metrics\n"
             ),
             inline=False
         )
