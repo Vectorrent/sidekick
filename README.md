@@ -49,8 +49,8 @@ pip install -e .
 | Command | Description |
 |---------|-------------|
 | `/system <prompt>` | Set custom system prompt |
-| `/good_bot [comment]` | Rate last response positively |
-| `/bad_bot [comment]` | Rate last response negatively |
+| `/good_bot` | Rate last response positively |
+| `/bad_bot` | Rate last response negatively |
 
 ## Core Components
 
