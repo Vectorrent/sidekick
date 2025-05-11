@@ -5,23 +5,27 @@ Interactive chat script for SmolLM2-135M-Instruct model using Transformers
 import os
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from peft import PeftModel, PeftConfig
+import glob
 
 # Global variables to hold the model and tokenizer
 model = None
 tokenizer = None
 device = None
+is_peft_model = False
 
-def load_model(model_name="HuggingFaceTB/SmolLM2-135M-Instruct"):
+def load_model(model_name="HuggingFaceTB/SmolLM2-135M-Instruct", adapter_path="./model"):
     """
-    Load the LLM model and tokenizer
+    Load the LLM model and tokenizer with PEFT adapters if available
     
     Args:
         model_name (str): HuggingFace model name/path
+        adapter_path (str): Path to PEFT adapter weights
         
     Returns:
         tuple: (tokenizer, model, device) or None if loading failed
     """
-    global model, tokenizer, device
+    global model, tokenizer, device, is_peft_model
     
     # Only load if not already loaded
     if model is not None and tokenizer is not None:
@@ -37,10 +41,38 @@ def load_model(model_name="HuggingFaceTB/SmolLM2-135M-Instruct"):
         # Load tokenizer
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         
-        # For single GPU or CPU
-        model = AutoModelForCausalLM.from_pretrained(model_name).to(device)
+        # Load base model
+        base_model = AutoModelForCausalLM.from_pretrained(model_name)
+        
+        # Check if adapters exist
+        adapter_exists = os.path.exists(adapter_path) and os.path.exists(os.path.join(adapter_path, "adapter_config.json"))
+        
+        if adapter_exists:
+            # Load model with PEFT adapters
+            try:
+                print(f"Loading PEFT adapters from {adapter_path}...")
+                model = PeftModel.from_pretrained(base_model, adapter_path)
+                is_peft_model = True
+                print("PEFT adapters loaded successfully!")
+            except Exception as adapter_e:
+                print(f"Error loading adapters: {adapter_e}")
+                print("Falling back to base model")
+                model = base_model
+                is_peft_model = False
+        else:
+            # No adapters found, use base model
+            model = base_model
+            is_peft_model = False
+            
+        # Move model to device
+        model = model.to(device)
         
         print(f"Model loaded successfully on {device}!")
+        if is_peft_model:
+            print("Using PEFT-adapted model for inference")
+        else:
+            print("Using base model for inference (no PEFT adapters found)")
+            
         return tokenizer, model, device
     except Exception as e:
         print(f"Error loading model: {e}")
@@ -80,7 +112,7 @@ def generate_response(messages, **generation_kwargs):
         # Set default generation parameters if not provided
         default_params = {
             'max_new_tokens': 256,
-            'temperature': 0.7,
+            'temperature': 0.15,
             'do_sample': True,
             'pad_token_id': tokenizer.eos_token_id
         }

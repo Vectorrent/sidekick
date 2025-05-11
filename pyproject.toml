@@ -17,6 +17,9 @@ dependencies = [
     "discord.py",
     "torch",
     "transformers",
+    "peft>=0.4.0",
+    "trl>=0.7.2",
+    "accelerate>=0.20.0",
 ]
 
 [project.scripts]
